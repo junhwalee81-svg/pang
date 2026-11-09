@@ -41,9 +41,10 @@ const URL = 'file:///' + path.resolve(__dirname, '..', 'index.html').replace(/\\
       await page.evaluate(() => {
         readyNextShot();
         placeBall(G.hole.cup - 2.5);
-        const s = slopeBetween(G.hole, G.ball.x, G.hole.cup);
+        let power = 0.02;
+        while (power < 1 && !simulateShot(shotOptions({ power })).holed) power += 0.004;
         pressShot();
-        G.gauge.pos = clamp(2.5 * (0.04 + s * 0.2) + 0.05, 0.05, 1);
+        G.gauge.pos = power + 0.012;
         pressShot();
         G.gauge.pos = 0;
         pressShot();

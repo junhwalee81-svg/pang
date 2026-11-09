@@ -4,8 +4,8 @@
 
 | 에셋 | 제작 | 라이선스 | 출처 | 쓴 곳 |
 |---|---|---|---|---|
-| Toon Characters 1 (캐릭터 부품·포즈) | Kenney | CC0 1.0 | https://kenney.nl/assets/toon-characters-1 | 캐릭터 6종 |
-| Background Elements Remastered (구름·나무·수풀·집·탑·울타리) | Kenney | CC0 1.0 | https://kenney.nl/assets/background-elements-redux | 코스 배경 |
+| Toon Characters 1 (캐릭터 부품·포즈) | Kenney | CC0 1.0 | https://kenney.nl/assets/toon-characters | 캐릭터 6종 |
+| Background Elements Remastered (구름·나무·수풀·집·탑·울타리) | Kenney | CC0 1.0 | https://kenney.nl/assets/background-elements-remastered | 코스 배경 |
 | Foliage Pack (꽃·풀·바위) | Kenney | CC0 1.0 | https://kenney.nl/assets/foliage-pack | 코스 장식 |
 | Particle Pack (연기·별·빛·고리) | Kenney | CC0 1.0 | https://kenney.nl/assets/particle-pack | 효과 입자 |
 | Grass001, Grass004, Ground037, Ground054 | ambientCG | CC0 1.0 | https://ambientcg.com | 잔디·흙·모래 질감 |
