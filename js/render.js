@@ -29,6 +29,7 @@ function renderGame(x, G) {
   drawBackdrop(ctx);
   drawDecor(ctx, 'back');
   drawTerrain(ctx);
+  if (G.hole) drawSlopeArrows(ctx);
   drawCupAndFlag(ctx);
   if (G.hole) {
     drawMarkers(ctx);
@@ -285,6 +286,53 @@ function drawWater(c) {
       x.stroke();
     }
   }
+}
+
+function slopeColor(pct) { return pct < 1 ? '#ffffff' : pct < 2.2 ? '#ffe45c' : '#ff9a3d'; }
+
+/** 퍼터일 때 그린 위에 내리막 방향 화살표를 흐르게 그린다 */
+function drawSlopeArrows(c) {
+  const { x, G, hole, cam, sx, sy } = c;
+  if (G.club !== 'PT' || !(G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact')) return;
+  const g = hole.green;
+  const band = bandPx(cam.z);
+  const spacing = Math.max(2.4, 58 / cam.z);
+  const size = clamp(cam.z * 0.34, 5, 10);
+  const phase = (G.time * 0.55) % 1;
+  for (let wx = g.from + spacing / 2; wx < g.to; wx += spacing) {
+    const s = slopeAt(hole, wx);
+    const pct = Math.abs(s) * 100;
+    if (pct < 0.15) continue;
+    const dir = s > 0 ? -1 : 1;
+    const ax = wx + dir * phase * spacing * 0.6;
+    if (ax < g.from || ax > g.to) continue;
+    const px = sx(ax);
+    if (px < -20 || px > c.W + 20) continue;
+    const py = sy(heightAt(hole, ax)) - band.far * 0.42;
+    x.save();
+    x.translate(px, py);
+    x.rotate(Math.atan(-s * 6) * (dir > 0 ? 1 : 1));
+    x.scale(dir, 1);
+    x.globalAlpha = 0.5 + 0.45 * Math.sin(phase * Math.PI);
+    x.fillStyle = slopeColor(pct);
+    x.strokeStyle = 'rgba(20,60,30,.65)';
+    x.lineWidth = 1.2;
+    for (let k = 0; k < 2; k++) {
+      const ox = k * size * 0.95 - size * 0.5;
+      x.beginPath();
+      x.moveTo(ox - size * 0.5, -size * 0.62);
+      x.lineTo(ox, -size * 0.62);
+      x.lineTo(ox + size * 0.55, 0);
+      x.lineTo(ox, size * 0.62);
+      x.lineTo(ox - size * 0.5, size * 0.62);
+      x.lineTo(ox + size * 0.05, 0);
+      x.closePath();
+      x.fill();
+      x.stroke();
+    }
+    x.restore();
+  }
+  x.globalAlpha = 1;
 }
 
 function drawCupAndFlag(c) {

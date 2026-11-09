@@ -128,6 +128,12 @@ function slopeAt(hole, x) {
   return (heightAt(hole, x + 0.25) - heightAt(hole, x - 0.25)) / 0.5;
 }
 
+/** x1→x2 구간의 평균 경사(소수, +는 x가 커질수록 높아짐). 구간이 짧으면 x1의 경사 */
+function slopeBetween(hole, x1, x2) {
+  if (Math.abs(x2 - x1) < 1.5) return slopeAt(hole, x1);
+  return (heightAt(hole, x2) - heightAt(hole, x1)) / (x2 - x1);
+}
+
 function surfaceAt(hole, x) {
   if (hole.flat) return 'fairway';
   const t = prepareHole(hole);
@@ -374,5 +380,5 @@ function shotEnv(o) {
 }
 
 if (typeof module !== 'undefined') {
-  Object.assign(globalThis, { PHYS, TERRAIN, TERRAIN_LIE, TERRAIN_IDS, HOLE_MIN_X, HOLE_STEP, lerp, clamp, smooth, prepareHole, FLAT_HOLE, heightAt, slopeAt, surfaceAt, sumStats, statFactors, BASE_STATS, launchFrom, makeBall, launchBall, stepBall, simulateShot, shotEnv });
+  Object.assign(globalThis, { PHYS, TERRAIN, TERRAIN_LIE, TERRAIN_IDS, HOLE_MIN_X, HOLE_STEP, lerp, clamp, smooth, prepareHole, FLAT_HOLE, heightAt, slopeAt, slopeBetween, surfaceAt, sumStats, statFactors, BASE_STATS, launchFrom, makeBall, launchBall, stepBall, simulateShot, shotEnv });
 }

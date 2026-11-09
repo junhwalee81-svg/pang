@@ -26,6 +26,7 @@ function resize() {
   G.view.playTop = top + miniH;
   G.view.playH = Math.max(160, H - (panelH || 180) - G.view.playTop);
   G.view.cy = G.view.playTop + G.view.playH * 0.5;
+  $('slopeBox').style.top = G.view.miniY + 48 + 'px';
 }
 
 /* ───────── HUD ───────── */
@@ -109,6 +110,7 @@ function syncHud() {
     b.disabled = !canAdjust;
     setText(b.querySelector('small'), clubReach(id));
   });
+  syncSlope();
   const unlocked = specialUnlocked();
   $('specialLock').classList.toggle('hide', unlocked);
   setText($('specialLock'), '🔒 이번 홀 팡 ' + Math.min(G.perfects, SPECIAL_UNLOCK) + '/' + SPECIAL_UNLOCK + ' — 2회면 특수샷 해금');
@@ -136,6 +138,24 @@ function syncHud() {
   $('gMark').style.left = gaugePercent(G.phase === 'aim' ? 0 : G.gauge.pos) + '%';
   $('gMark').classList.toggle('hot', G.phase === 'impact');
   setText($('gPct'), Math.round((G.phase === 'power' ? G.gauge.pos : showPower ? G.gauge.power : 0) * 100) + '%');
+}
+
+function syncSlope() {
+  const box = $('slopeBox');
+  const show = G.club === 'PT' && (G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact');
+  box.classList.toggle('hide', !show);
+  if (!show) return;
+  const hole = G.hole, b = G.ball;
+  const s = slopeBetween(hole, b.x, hole.cup);
+  const pct = Math.abs(s) * 100;
+  const toRight = hole.cup >= b.x;
+  const climbs = toRight ? s > 0 : s < 0;
+  setText($('slopePct'), pct.toFixed(1) + '%');
+  setText($('slopeType'), pct < 0.3 ? '평지' : climbs ? '오르막' : '내리막');
+  // 화살표는 내리막 방향을 가리킨다
+  $('slopeArrow').style.transform = 'rotate(' + (s > 0 ? 180 : 0) + 'deg) rotate(' + (s > 0 ? -1 : 1) * clamp(pct * 9, 0, 40) + 'deg)';
+  $('slopeArrow').style.opacity = pct < 0.3 ? 0.25 : 1;
+  box.dataset.level = pct < 1 ? 'low' : pct < 2.2 ? 'mid' : 'high';
 }
 
 function spinLabel() {

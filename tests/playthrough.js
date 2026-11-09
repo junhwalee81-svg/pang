@@ -90,6 +90,19 @@ async function run(width, height, name) {
   console.log('special', JSON.stringify(special));
   if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
   await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
+  // 그린 경사: 퍼터일 때만 표시, 수치·방향이 데이터와 맞는지
+  const slope = await page.evaluate(() => {
+    const g = G.hole.green;
+    placeBall(g.from + 2);
+    const pt = { club: G.club, shown: !document.getElementById('slopeBox').classList.contains('hide') };
+    return { pt, slopeData: g.slope, expected: slopeBetween(G.hole, G.ball.x, G.hole.cup) * 100 };
+  });
+  await page.waitForTimeout(350);
+  const shownSlope = await page.evaluate(() => ({ pct: document.getElementById('slopePct').textContent, type: document.getElementById('slopeType').textContent, visible: !document.getElementById('slopeBox').classList.contains('hide') }));
+  await page.screenshot({ path: path.join(OUT, name + '_13slope.png') });
+  const hidden = await page.evaluate(async () => { placeBall(G.hole.cup - 120); await new Promise((r) => setTimeout(r, 120)); return document.getElementById('slopeBox').classList.contains('hide'); });
+  console.log('slope', JSON.stringify({ slope, shownSlope, hidden }));
+  if (slope.pt.club !== 'PT' || !shownSlope.visible || !hidden || Math.abs(parseFloat(shownSlope.pct) - Math.abs(slope.expected)) > 0.11) errors.push('slope check failed');
   // 패시브: 캐릭터별 효과가 실제 수치에 반영되는지
   const passive = await page.evaluate(() => {
     placeBall(G.hole.cup - 150);

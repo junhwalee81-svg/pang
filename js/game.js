@@ -193,6 +193,7 @@ function readyNextShot() {
 
 function nextHole() {
   if (G.phase === 'holed') finishHole();
+  if (typeof closeModal === 'function') closeModal();
   if (G.holeIndex + 1 < HOLES.length) loadHole(G.holeIndex + 1);
   else finishRound();
 }
