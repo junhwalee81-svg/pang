@@ -90,6 +90,23 @@ async function run(width, height, name) {
   console.log('special', JSON.stringify(special));
   if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
   await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
+  // 합성음: 오프라인으로 렌더해 무음·찢어짐이 없는지 측정
+  const audio = await page.evaluate(async () => {
+    const list = [['whoosh'], ['hit', '1W'], ['hit', '5I'], ['hit', 'SW'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'fairway'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['lip'], ['coin'], ['fanfare']];
+    const out = {};
+    for (const [name, arg] of list) {
+      const ctx = new OfflineAudioContext(1, 44100 * 1.8, 44100);
+      SFX.compose(ctx, SFX.makeBus(ctx), name, 0.01, arg);
+      const d = (await ctx.startRendering()).getChannelData(0);
+      let peak = 0, sum = 0, last = 0;
+      for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; sum += a * a; if (a > 0.003) last = i; }
+      out[name + (arg ? ':' + arg : '')] = [+peak.toFixed(2), +Math.sqrt(sum / d.length).toFixed(3), +(last / 44100).toFixed(2)];
+    }
+    return out;
+  });
+  console.log('audio [최대, RMS, 길이초]', JSON.stringify(audio));
+  for (const k in audio) if (audio[k][0] < 0.05 || audio[k][0] >= 1 || audio[k][2] <= 0) errors.push('audio ' + k);
+  if (audio.cup[2] < 0.6) errors.push('cup too short');
   // 그린 경사: 퍼터일 때만 표시, 수치·방향이 데이터와 맞는지
   const slope = await page.evaluate(() => {
     const g = G.hole.green;

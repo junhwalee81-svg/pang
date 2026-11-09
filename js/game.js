@@ -250,6 +250,7 @@ function hitBall(err) {
   G.launched = false;
   G.swingClub = G.club;
   G.phiTop = G.golfer.phi;
+  if (G.club !== 'PT') SFX.play('whoosh');
 }
 
 function launchNow() {
@@ -270,7 +271,7 @@ function launchNow() {
   else {
     if (o.special) G.pop = { text: SPECIAL_SHOTS[o.special].name, t: 0.8, max: 0.8, fill: '#ffffff', stroke: 'rgba(40,20,110,.92)' };
     G.golfer.expr = lp.miss > 0.14 ? 'headShock' : 'head';
-    SFX.play('hit');
+    SFX.play('hit', G.swingClub);
     spawn('smoke', G.ball.x, G.ball.y + 0.2, 4, { color: '#f4f0d0', size: 34, speed: 3, life: 0.5, up: 1 });
   }
 }
@@ -286,7 +287,7 @@ function onPerfect(special) {
   const newly = !unlockedBefore && specialUnlocked();
   const sub = special ? SPECIAL_SHOTS[special].name + ' 퍼펙트' : newly ? '특수샷 해금!' : '퍼펙트 임팩트';
   G.pop = { text: '팡!', sub, t: 0.95, max: 0.95, big: true, color: 'rgba(255,214,90,.5)' };
-  SFX.play('hitPerfect');
+  SFX.play('hitPerfect', G.swingClub);
   spawn('star', G.ball.x, G.ball.y + 0.3, 16, { color: '#ffe066', size: 26, speed: 11, life: 0.75, add: true });
   spawn('ring', G.ball.x, G.ball.y + 0.3, 1, { color: '#ffffff', size: 60, speed: 0, life: 0.42, add: true, grow: 5 });
 }
@@ -385,7 +386,7 @@ function updateBall(dt) {
 
 function handleBallEvent(ev) {
   if (ev.kind === 'bounce') {
-    SFX.play('bounce');
+    SFX.play('bounce', ev.surface);
     if (G.ball.bounces === 1 && SPECIAL_SHOTS[G.shotStyle]) {
       const sp = SPECIAL_SHOTS[G.shotStyle];
       spawn('ring', ev.x, ev.y + 0.1, 1, { color: sp.glow, size: 46, speed: 0, life: 0.5, grow: 4, add: true });
@@ -404,7 +405,7 @@ function handleBallEvent(ev) {
   } else if (ev.kind === 'cup') {
     SFX.play('cup');
   } else if (ev.kind === 'lip') {
-    SFX.play('bounce');
+    SFX.play('lip');
   }
 }
 
@@ -449,7 +450,7 @@ function holeOut() {
   spawn('magic', G.hole.cup, heightAt(G.hole, G.hole.cup) + 1, 12, { color: '#9df0ff', size: 40, speed: 4, life: 0.9, up: 6, add: true });
   G.phase = 'holed';
   G.holedT = GAME.holeOutDelay;
-  SFX.play('fanfare');
+  if (diff < 0) setTimeout(() => SFX.play('fanfare'), 700);
 }
 
 function coinsFor(strokes, par) {
