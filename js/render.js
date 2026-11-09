@@ -93,6 +93,7 @@ function drawDecor(c, layer) {
   for (const d of list) {
     const px = sx(d.x);
     if (px < -margin || px > W + margin) continue;
+    if (layer === 'front' && c.G.hole && Math.abs(d.x - c.G.golfer.x) < 6) continue; // 캐릭터와 공을 가리지 않게
     const im = ART.scene[d.kind];
     const h = d.h * cam.z, w = (h * im.width) / im.height;
     const base = sy(heightAt(hole, d.x));

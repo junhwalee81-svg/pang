@@ -5,7 +5,7 @@
 
 ## 작업 원칙
 1. 작업 전에 계획을 짧게 보여 주고 바로 진행한다. 기능 하나 = 커밋 하나, 커밋 메시지는 한국어.
-2. 물리·밸런스 수치는 파일 상단 상수(`PHYS`, `TERRAIN`, `TERRAIN_LIE`, `CLUB_TYPES`, `SPECIAL_SHOTS`, `GAME`)에서만 고친다.
+2. 물리·밸런스 수치는 파일 상단 상수(`PHYS`, `HAZARD`, `TERRAIN`, `TERRAIN_LIE`, `CLUB_TYPES`, `SPECIAL_SHOTS`, `GAME`)에서만 고친다.
 3. `render.js`·`sprites.js`는 게임 상태를 바꾸지 않는다(그림 캐시 제외). 상태 변경은 `game.js`·`ui.js`만.
 4. 외부 에셋은 CC0만, `CREDITS.md`에 출처를 적는다. 기존 IP의 캐릭터·로고·이름은 쓰지 않는다(완벽 임팩트의 게임 내 이름은 "팡!").
 5. 폭 380px 세로 화면과 PC 둘 다 깨지지 않아야 한다.
@@ -17,13 +17,13 @@
 | `index.html`, `css/style.css` | DOM 뼈대(HUD, 조작판, 타이틀, 창)와 스타일 |
 | `js/assets.js` | 내장 그림(자동 생성, `tools/bake_assets.py`) |
 | `js/data.js` | `CLUB_TYPES`, `SPECIAL_SHOTS`, `ITEMS`(장비 5슬롯, 캐릭터 `passive`), `THEMES`, `HOLES` |
-| `js/physics.js` | `PHYS`, `TERRAIN`, 지형 표, `launchFrom`, `stepBall`, `simulateShot`(Node에서도 실행) |
+| `js/physics.js` | `PHYS`, `HAZARD`, `TERRAIN`, 지형 표, `rollHoleLayout`(코스 변수), `launchFrom`, `stepBall`, `simulateShot`(Node에서도 실행) |
 | `js/audio.js` | `SFX`: WebAudio 합성음. `compose`는 오프라인 렌더로도 검사 가능 |
 | `js/sprites.js` | 그림 로드·캐시, 하늘·산, 스윙 리그 `drawGolfer`, `drawHat`, 상점 아이콘 |
 | `js/render.js` | `renderGame`: 배경 → 지형 → 깃발 → 캐릭터 → 공·궤적 → 입자 → 빛 → 미니맵 |
 | `js/game.js` | `GAME` 상수, 상태 `G`, 샷 진행, 입자, 카메라. 공개 함수 `pressShot`, `placeBall(x)`, `readyNextShot` |
 | `js/ui.js` | 입력, HUD 동기화, 상점·결과 창, 게임 루프, `?test` 모드 |
-| `tests/` | `distance.js`(비거리), `playthrough.js`(전 기능), `tour.js`(6홀 완주·380px 넘침), `hat_preview.js` |
+| `tests/` | `distance.js`(비거리), `hazards.js`(코스 변수), `playthrough.js`(전 기능), `tour.js`(6홀 완주·380px 넘침), `hat_preview.js` |
 | `tools/bake_assets.py` | CC0 원본 → `assets.js` |
 
 샷 단계: `aim → power → impact → swing → ball → stopped/holed → score`
@@ -43,6 +43,14 @@
 - 특수샷: 같은 홀에서 팡 2회 이상이면 해금(퍼터 제외). 샷 전 선택.
 - 패시브: 레오 바람 -10%, 미나 퍼팅 오차 -20%, 카이 드라이버 +5%, 소라 백스핀 +30%, 좀비 버디 팡 코인 2배, G-BOT 마커에 바람 반영.
 
+## 코스 변수 (`HAZARD`, 홀 시작마다 `rollHoleLayout`이 새로 정함)
+- 잔요철: 페어웨이·러프의 높이가 조금씩 달라진다. 그린과 그 둘레는 그대로다.
+- 튀는 방향: 지형별 `kick` 폭만큼 착지 때 지면 기울기가 흔들린다(러프가 가장 크다).
+- 지면 구역: 단단한 땅(`hard`, 잘 구름), 질퍽한 땅(`soft`, 잘 멈춤·샷 속도 ×0.94).
+- 돌: 낮은 공이 맞으면 55%는 앞으로, 45%는 뒤로 튄다.
+- 나무: 잎에 들어가면 22%는 통과, 나머지는 속도가 꺾인다. 잎 아래를 지나는 공은 40% 확률로 줄기에 맞는다. 그린 앞 8m 안에는 없다.
+- 최대비거리 마커는 장애물을 무시한다(`ignoreHazards`). 공의 임의값은 `b.seed`로, `simulateShot`은 시드가 같으면 결과가 같다.
+
 ## 기준 비거리 (기본 스탯, 무풍, 평지)
 1W 캐리 209.9m(허용 195~230), 5I 160.3m(약 160), SW 82.3m(약 80). 토마호크 1W 캐리 215m·런 1m, 스파이크 1W 캐리 170m·런 70m.
 
@@ -50,6 +58,7 @@
 ```bash
 for f in js/*.js; do node --check "$f"; done
 node tests/distance.js
+node tests/hazards.js
 NODE_PATH=<playwright-core의 node_modules> node tests/playthrough.js <스크린샷 폴더>
 NODE_PATH=<playwright-core의 node_modules> node tests/tour.js <스크린샷 폴더>
 ```
@@ -57,7 +66,7 @@ NODE_PATH=<playwright-core의 node_modules> node tests/tour.js <스크린샷 폴
 
 ## 다음 작업 후보
 - 실제 휴대폰에서 터치 게이지 속도와 소리 균형 조정
-- 코스 확장(9·18홀), 비·저녁 같은 날씨, 나무에 공이 맞는 충돌
+- 코스 확장(9·18홀), 비·저녁 같은 날씨, 비행 중 돌풍
 - 온라인 점수판과 일일 도전(공용에셋의 Supabase 점수판 재사용)
 - 스윙 중 팔·몸 회전 다듬기, 캐릭터별 승리 포즈
 - 왼쪽으로 치는 홀, 도그레그를 표현할 코스 구조
