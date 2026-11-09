@@ -78,8 +78,9 @@ async function run(width, height, name) {
     G.perfects = 1; setSpecial('tomahawk');
     const locked = G.special === null;
     G.perfects = 2; setClub('5I'); setSpecial('tomahawk');
-    const hi = simulateShot(shotOptions()); setSpecial('spike');
-    const lo = simulateShot(shotOptions());
+    const flat = { hole: undefined, x: 0, lie: 1 }; // 코스 변수와 무관하게 평지에서 비교
+    const hi = simulateShot(shotOptions(flat)); setSpecial('spike');
+    const lo = simulateShot(shotOptions(flat));
     return { locked, pick: G.special, hiApex: hi.apex, loApex: lo.apex, hiRun: hi.total - hi.carry, loRun: lo.total - lo.carry };
   });
   await page.waitForTimeout(200);
@@ -94,13 +95,23 @@ async function run(width, height, name) {
   await page.evaluate(() => {
     if (!['aim', 'stopped', 'intro', 'ball'].includes(G.phase)) readyNextShot();
     const L = G.hole.layout;
-    placeBall(L.rocks[0].x - 9);
-    L.trees.push({ x: G.ball.x + 34, h: 30, r: 14, kind: L.trees[0].kind });
+    let spot = null;
+    for (const r of L.rocks) for (const d of [9, 7, 5, 3]) {
+      if (spot === null && !['water', 'bunker', 'green'].includes(surfaceAt(G.hole, r.x - d))) spot = r.x - d;
+    }
+    placeBall(spot);
     window.__ev = [];
     const orig = window.handleBallEvent;
     window.handleBallEvent = (e) => { window.__ev.push(e.kind); orig(e); };
     setClub('5I');
     window.__speed = 1;
+    // 공이 1초 뒤 지날 자리에 잎 중심이 오도록 검사용 나무를 놓는다
+    const probe = makeBall(G.ball.x, G.ball.y);
+    launchBall(probe, launchFrom(shotOptions({ power: 1, impact: 0.1 })));
+    const env = shotEnv({ wind: G.wind, ignoreHazards: true });
+    while (probe.t < 1 && probe.mode === 'air') stepBall(probe, G.hole, env, PHYS.dt);
+    const rel = probe.y - heightAt(G.hole, probe.x);
+    L.trees.push({ x: probe.x, h: rel / (HAZARD.canopyBase + (1 - HAZARD.canopyBase) / 2), r: 9, kind: L.trees[0].kind });
   });
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join(OUT, name + '_14hazard.png') });

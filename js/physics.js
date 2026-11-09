@@ -112,8 +112,10 @@ function rollHoleLayout(hole, seed) {
   hole.table = null;
   hole.layout = { seed, bumps, patches, rocks: [], trees: [] };
   prepareHole(hole);
-  placeRocks(hole, rng);
+  // 나무는 놓을 수 있는 구간이 좁아 돌보다 먼저 자리를 잡는다
+  hole.layout.used = [];
   placeTrees(hole, rng);
+  placeRocks(hole, rng);
   return hole.layout;
 }
 
@@ -151,7 +153,6 @@ function placeTrees(hole, rng) {
 
 function placeRocks(hole, rng) {
   const L = hole.layout;
-  L.used = L.used || [];
   const count = Math.round(rangeOf(rng, HAZARD.rockCount[hole.par]));
   L.rocks = pickSpots(hole, rng, count, L.used, 24, hole.end - 6).map((x) => ({
     x, r: rangeOf(rng, HAZARD.rockR), kind: 'rock' + (1 + ((rng() * 3) | 0)),

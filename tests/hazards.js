@@ -83,6 +83,9 @@ for (const h of HOLES) {
   const okPlace = T.every((t) => t.x < h.green.from - HAZARD.treeClearGreen + 1e-6 && !['water', 'bunker', 'green', 'tee'].includes(surfaceAt(h, t.x)));
   check(h.name + ' 나무 배치', T.length >= 1 && okPlace, T.length + '그루');
 }
+let noTree = 0;
+for (const h of HOLES) for (let s = 1; s <= 200; s++) { rollHoleLayout(h, s * 131); if (!h.layout.trees.length) noTree++; }
+check('어떤 시드에도 나무가 있음', noTree === 0, '나무 없는 코스 ' + noTree + '건/1200');
 const ht = HOLES[0];
 rollHoleLayout(ht, 21);
 ht.layout.rocks = [];
