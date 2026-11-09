@@ -8,6 +8,8 @@ var SURFACE_STYLE = {
   rough: { tex: 'grass', strength: 0.62, key: 'rough' },
   green: { tex: 'turf', strength: 0.24, fixed: '#a2ee6c' },
   bunker: { tex: 'sand', strength: 0.5, fixed: '#f3dca2' },
+  hard: { tex: 'soil', strength: 0.42, fixed: '#cdb777' },
+  soft: { tex: 'grass', strength: 0.6, fixed: '#4c8446' },
 };
 
 function surfaceColor(theme, type) {
@@ -561,7 +563,7 @@ function drawMinimap(c) {
   }
   const px = (wx) => mx + ((wx - x0) / (x1 - x0)) * mw;
   const py = (wy) => my + mh - 7 - ((wy - lo) / Math.max(4, hi - lo)) * (mh - 20);
-  const COLORS = { tee: '#c7f58c', fairway: '#8fe35e', rough: '#459a43', bunker: '#f2dc9b', green: '#c8ff8a', water: '#46b8ec' };
+  const COLORS = { tee: '#c7f58c', fairway: '#8fe35e', rough: '#459a43', bunker: '#f2dc9b', green: '#c8ff8a', water: '#46b8ec', hard: '#d3bf80', soft: '#4c8446' };
   for (let i = 0; i < mw; i += 2) {
     const wx = x0 + (i / mw) * (x1 - x0);
     const ty = surfaceAt(hole, wx);

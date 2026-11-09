@@ -183,7 +183,7 @@ function ridgeCanvas(themeId, layer) {
 
 /** 홀마다 고정된 나무·수풀·꽃 배치 */
 function holeDecor(hole) {
-  return cached('decor:' + hole.name, () => {
+  return cached('decor:' + hole.name + ':' + (hole.layout ? hole.layout.seed : 0), () => {
     const t = THEMES[hole.theme];
     const rng = seededRng(hole.cup * 31 + hole.par);
     const back = [], front = [];

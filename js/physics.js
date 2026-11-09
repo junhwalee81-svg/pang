@@ -31,18 +31,30 @@ var PHYS = {
   distToSpeed: 0.76,      // 비거리 배율 → 속도 배율 지수
 };
 
+// 홀을 시작할 때마다 새로 정해지는 코스 변수
+var HAZARD = {
+  bump: { fairway: 0.07, rough: 0.2, hard: 0.1, soft: 0.05 }, // 잔요철 높이(m)
+  bumpSmooth: 8,          // 요철 높이 전환을 고르게 하는 표 칸 수(칸당 0.25m)
+  greenMargin: 4,         // 그린 둘레 이 거리(m)까지는 요철 없음
+  patchCount: [2, 4],     // 페어웨이의 단단한 땅·질퍽한 땅 수
+  patchLen: [8, 20],      // 그 길이(m)
+};
+
 // rest: 반발, tang: 튈 때 수평 유지율, mu: 구름 저항, grip: 백스핀 적용 비율, hold: 정지 경사 한계
+// kick: 튈 때 지면 기울기가 임의로 흔들리는 폭
 var TERRAIN = {
-  tee: { rest: 0.3, tang: 0.7, mu: 0.3, grip: 0.6, hold: 0.09 },
-  fairway: { rest: 0.3, tang: 0.62, mu: 0.4, grip: 0.65, hold: 0.09 },
-  rough: { rest: 0.2, tang: 0.46, mu: 0.75, grip: 0.3, hold: 0.25 },
-  bunker: { rest: 0.04, tang: 0.18, mu: 2.8, grip: 0.1, hold: 1 },
-  green: { rest: 0.28, tang: 0.8, mu: 0.088, grip: 1, hold: 0.06 },
-  water: { rest: 0, tang: 0, mu: 9, grip: 0, hold: 1 },
+  tee: { rest: 0.3, tang: 0.7, mu: 0.3, grip: 0.6, hold: 0.09, kick: 0.03 },
+  fairway: { rest: 0.3, tang: 0.62, mu: 0.4, grip: 0.65, hold: 0.09, kick: 0.07 },
+  rough: { rest: 0.2, tang: 0.46, mu: 0.75, grip: 0.3, hold: 0.25, kick: 0.22 },
+  bunker: { rest: 0.04, tang: 0.18, mu: 2.8, grip: 0.1, hold: 1, kick: 0.03 },
+  green: { rest: 0.28, tang: 0.8, mu: 0.088, grip: 1, hold: 0.06, kick: 0 },
+  water: { rest: 0, tang: 0, mu: 9, grip: 0, hold: 1, kick: 0 },
+  hard: { rest: 0.42, tang: 0.8, mu: 0.22, grip: 0.4, hold: 0.09, kick: 0.13 },
+  soft: { rest: 0.1, tang: 0.3, mu: 1.15, grip: 0.8, hold: 0.25, kick: 0.04 },
 };
 // 공이 놓인 지형에 따른 샷 속도 배율
-var TERRAIN_LIE = { rough: 0.88, bunker: 0.5, bunkerWedge: 0.86 };
-var TERRAIN_IDS = ['rough', 'tee', 'fairway', 'bunker', 'green', 'water'];
+var TERRAIN_LIE = { rough: 0.88, bunker: 0.5, bunkerWedge: 0.86, soft: 0.94 };
+var TERRAIN_IDS = ['rough', 'tee', 'fairway', 'bunker', 'green', 'water', 'hard', 'soft'];
 
 var HOLE_MIN_X = -70;
 var HOLE_STEP = 0.25;
@@ -50,6 +62,58 @@ var HOLE_STEP = 0.25;
 function lerp(a, b, t) { return a + (b - a) * t; }
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 function smooth(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+
+function makeRng(seed) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function rangeOf(rng, pair) { return pair[0] + (pair[1] - pair[0]) * rng(); }
+
+/** 이번 플레이의 코스 변수를 정한다. 같은 시드면 항상 같은 코스가 된다 */
+function rollHoleLayout(hole, seed) {
+  const rng = makeRng(seed);
+  const bumps = [[0.2, 0.5], [0.55, 0.3], [1.3, 0.2]].map(([k, a]) => ({ k: k * (0.8 + rng() * 0.4), a, p: rng() * 6.28 }));
+  const patches = [];
+  const count = Math.round(rangeOf(rng, HAZARD.patchCount));
+  for (let i = 0; i < count; i++) {
+    const len = rangeOf(rng, HAZARD.patchLen);
+    const from = hole.fair[0] + rng() * Math.max(1, hole.fair[1] - hole.fair[0] - len);
+    patches.push({ from, to: from + len, type: rng() < 0.5 ? 'hard' : 'soft' });
+  }
+  hole.table = null;
+  hole.layout = { seed, bumps, patches, rocks: [], trees: [] };
+  prepareHole(hole);
+  return hole.layout;
+}
+
+function applyBumps(hole, h, type, n) {
+  const g = hole.green;
+  const bumps = hole.layout.bumps;
+  const amp = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = HOLE_MIN_X + i * HOLE_STEP;
+    const near = x >= g.from - HAZARD.greenMargin && x <= g.to + HAZARD.greenMargin;
+    amp[i] = near ? 0 : HAZARD.bump[TERRAIN_IDS[type[i]]] || 0;
+  }
+  const R = HAZARD.bumpSmooth;
+  for (let i = 0; i < n; i++) {
+    let sum = 0, c = 0;
+    for (let j = Math.max(0, i - R); j <= Math.min(n - 1, i + R); j++) { sum += amp[j]; c++; }
+    const x = HOLE_MIN_X + i * HOLE_STEP;
+    let wave = 0;
+    for (const b of bumps) wave += b.a * Math.sin(x * b.k + b.p);
+    const a = sum / c;
+    const blocked = x >= g.from - 2 && x <= g.to + 2;
+    if (!blocked) h[i] += a * wave;
+  }
+}
 
 function basePointHeight(pts, x) {
   if (x <= pts[0][0]) return pts[0][1];
@@ -82,7 +146,10 @@ function prepareHole(hole) {
     let y = basePointHeight(hole.pts, x);
     let t = ID.rough;
     if (x >= hole.tee[0] && x <= hole.tee[1]) t = ID.tee;
-    if (x >= hole.fair[0] && x <= hole.fair[1]) t = ID.fairway;
+    if (x >= hole.fair[0] && x <= hole.fair[1]) {
+      t = ID.fairway;
+      if (hole.layout) for (const p of hole.layout.patches) if (x >= p.from && x <= p.to) t = ID[p.type];
+    }
     if (x >= g.from - 6 && x <= g.to + 6) {
       const blend = smooth((x - (g.from - 6)) / 6) * (1 - smooth((x - g.to) / 6));
       const wave = 0.02 * Math.sin((x - hole.cup) * 0.31) * smooth(Math.abs(x - hole.cup) / 4);
@@ -99,6 +166,7 @@ function prepareHole(hole) {
     h[i] = y;
     type[i] = t;
   }
+  if (hole.layout) applyBumps(hole, h, type, n);
   const level = [];
   for (const p of hole.ponds) {
     const i0 = Math.floor((p[0] - HOLE_MIN_X) / HOLE_STEP), i1 = Math.floor((p[1] - HOLE_MIN_X) / HOLE_STEP);
@@ -190,7 +258,7 @@ function launchFrom(o) {
 }
 
 function makeBall(x, y) {
-  return { x, y, vx: 0, vy: 0, spin: 0, t: 0, mode: 'stop', rot: 0, startX: x, carryX: null, apex: y, bounces: 0, rollMu: 1, lipUntil: 0, events: [], holed: false };
+  return { x, y, vx: 0, vy: 0, spin: 0, t: 0, mode: 'stop', rot: 0, startX: x, carryX: null, apex: y, bounces: 0, rollMu: 1, lipUntil: 0, seed: 1, events: [], holed: false };
 }
 
 function launchBall(b, lp) {
@@ -208,6 +276,12 @@ function launchBall(b, lp) {
   b.lipUntil = 0;
   b.mode = lp.putt ? 'roll' : 'air';
   b.rollMu = 1;
+}
+
+/** 공마다 다른 임의값(0~1). 시드가 같으면 결과가 같다 */
+function ballRand(b) {
+  b.seed = (Math.imul(b.seed, 1664525) + 1013904223) | 0;
+  return ((b.seed >>> 8) & 0xffff) / 65536;
 }
 
 function emit(b, kind, surface, speed) { b.events.push({ kind, surface, speed, x: b.x, y: b.y }); }
@@ -284,7 +358,7 @@ function landBall(b, hole, env, gy) {
     emit(b, 'water', type, 0);
     return;
   }
-  const s = slopeAt(hole, b.x);
+  const s = slopeAt(hole, b.x) + (hole.flat ? 0 : (ballRand(b) * 2 - 1) * surf.kick);
   const len = Math.hypot(1, s);
   const nx = -s / len, ny = 1 / len, tx = 1 / len, ty = s / len;
   const vn = b.vx * nx + b.vy * ny;
@@ -357,6 +431,7 @@ function simulateShot(o) {
   const x = o.x || 0;
   const lp = launchFrom(Object.assign({ power: 1, club: '1W', stats: BASE_STATS, impact: 0 }, o));
   const b = makeBall(x, heightAt(hole, x));
+  b.seed = o.seed || 12345;
   launchBall(b, lp);
   const env = shotEnv(o);
   let guard = 0;
@@ -380,5 +455,5 @@ function shotEnv(o) {
 }
 
 if (typeof module !== 'undefined') {
-  Object.assign(globalThis, { PHYS, TERRAIN, TERRAIN_LIE, TERRAIN_IDS, HOLE_MIN_X, HOLE_STEP, lerp, clamp, smooth, prepareHole, FLAT_HOLE, heightAt, slopeAt, slopeBetween, surfaceAt, sumStats, statFactors, BASE_STATS, launchFrom, makeBall, launchBall, stepBall, simulateShot, shotEnv });
+  Object.assign(globalThis, { HAZARD, rollHoleLayout, PHYS, TERRAIN, TERRAIN_LIE, TERRAIN_IDS, HOLE_MIN_X, HOLE_STEP, lerp, clamp, smooth, prepareHole, FLAT_HOLE, heightAt, slopeAt, slopeBetween, surfaceAt, sumStats, statFactors, BASE_STATS, launchFrom, makeBall, launchBall, stepBall, simulateShot, shotEnv });
 }

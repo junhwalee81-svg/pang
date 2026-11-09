@@ -79,7 +79,7 @@ function startRound() {
 function loadHole(i) {
   G.holeIndex = i;
   G.hole = HOLES[i];
-  prepareHole(G.hole);
+  rollHoleLayout(G.hole, (Math.random() * 2147483647) | 0);
   G.strokes = 0;
   G.perfects = 0;
   G.resultShown = false;
@@ -259,6 +259,7 @@ function launchNow() {
   const lp = launchFrom(o);
   G.lastX = G.ball.x;
   G.ball = makeBall(G.ball.x, G.ball.y);
+  G.ball.seed = (Math.random() * 2147483647) | 0;
   launchBall(G.ball, lp);
   G.env = shotEnv(Object.assign({}, o, { wind: G.wind }));
   G.strokes++;
