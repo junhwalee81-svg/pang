@@ -209,6 +209,8 @@ function holeDecor(hole) {
 /* ───────── 캐릭터 리그 ───────── */
 
 var RIG = { chestY: -105, armR: 50, swingArmRatio: 0.72, spriteToWorld: 1 / 30 };
+// 머리카락 높이가 달라서 캐릭터마다 모자 높이를 맞춘다
+var HAT_DROP = { leo: 12, mina: 4, kai: 9, sora: 3, zombie: 11, gbot: 6 };
 
 function rigGrip(phi) {
   const a = phi * RIG.swingArmRatio * Math.PI / 180;
@@ -264,44 +266,156 @@ function legSprite(charId, shoesId, part) {
   });
 }
 
+function shadeColor(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c) => Math.round(clamp(amt > 0 ? c + (255 - c) * amt : c * (1 + amt), 0, 255));
+  return 'rgb(' + f((n >> 16) & 255) + ',' + f((n >> 8) & 255) + ',' + f(n & 255) + ')';
+}
+
+function hatGradient(x, color, top, bottom) {
+  const g = x.createLinearGradient(0, top, 0, bottom);
+  g.addColorStop(0, shadeColor(color, 0.3));
+  g.addColorStop(0.55, color);
+  g.addColorStop(1, shadeColor(color, -0.2));
+  return g;
+}
+
+/** 모양 위쪽에 얹는 Kenney풍 밝은 면 */
+function hatHighlight(x, fn) {
+  x.save();
+  x.fillStyle = 'rgba(255,255,255,.3)';
+  x.beginPath();
+  fn();
+  x.fill();
+  x.restore();
+}
+
+/** 챙이 머리에 드리우는 그늘 */
+function hatCastShadow(x, cx, cy, rx, ry) {
+  x.save();
+  x.fillStyle = 'rgba(40,20,20,.24)';
+  x.beginPath();
+  x.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  x.fill();
+  x.restore();
+}
+
+/** 머리 그림(106×96) 위에 모자를 그린다. 그늘·밝은 면을 함께 그려 Kenney 캐릭터와 맞춘다 */
 function drawHat(x, id) {
   const it = ITEMS.hat.find((h) => h.id === id);
   if (!it || !it.color) return;
-  x.fillStyle = it.color;
-  x.beginPath();
+  const c = it.color;
   if (id === 'hat_cap') {
-    x.ellipse(50, 22, 45, 30, 0, Math.PI, 0);
-    x.fill();
-    x.fillRect(5, 20, 90, 7);
+    hatCastShadow(x, 62, 33, 44, 7);
+    x.fillStyle = hatGradient(x, c, -14, 30);
     x.beginPath();
-    x.ellipse(82, 25, 28, 7, 0.08, 0, Math.PI * 2);
+    x.moveTo(5, 28);
+    x.bezierCurveTo(2, -20, 92, -24, 97, 26);
+    x.closePath();
     x.fill();
+    hatHighlight(x, () => { x.moveTo(15, 14); x.bezierCurveTo(22, -12, 62, -15, 76, 0); x.bezierCurveTo(55, -6, 32, 0, 15, 14); });
+    x.fillStyle = shadeColor(c, -0.28);
+    x.fillRect(5, 24, 92, 5);
+    x.fillStyle = shadeColor(c, -0.12);
+    x.beginPath();
+    x.arc(51, -8.5, 3.5, 0, Math.PI * 2);
+    x.fill();
+    x.fillStyle = '#ffffff';
+    x.beginPath();
+    x.arc(50, 11, 8.5, 0, Math.PI * 2);
+    x.fill();
+    x.fillStyle = c;
+    x.beginPath();
+    x.arc(50, 11, 4, 0, Math.PI * 2);
+    x.fill();
+    x.fillStyle = shadeColor(c, -0.22);
+    x.beginPath();
+    x.ellipse(82, 31, 32, 7, 0.06, 0, Math.PI * 2);
+    x.fill();
+    x.fillStyle = hatGradient(x, c, 20, 34);
+    x.beginPath();
+    x.ellipse(82, 27.5, 32, 7, 0.06, 0, Math.PI * 2);
+    x.fill();
+    hatHighlight(x, () => x.ellipse(77, 25.5, 21, 2.4, 0.04, 0, Math.PI * 2));
   } else if (id === 'hat_visor') {
-    x.roundRect(4, 15, 94, 11, 5);
-    x.fill();
+    hatCastShadow(x, 60, 31, 46, 6);
+    x.fillStyle = hatGradient(x, c, 11, 28);
     x.beginPath();
-    x.ellipse(82, 26, 30, 7, 0.08, 0, Math.PI * 2);
+    x.roundRect(3, 12, 96, 15, 7);
     x.fill();
+    hatHighlight(x, () => x.roundRect(10, 14, 66, 3.6, 2));
+    x.fillStyle = 'rgba(255,255,255,.88)';
+    x.fillRect(3, 21, 96, 2.2);
+    x.fillStyle = shadeColor(c, -0.3);
+    x.beginPath();
+    x.ellipse(82, 31, 34, 7.5, 0.06, 0, Math.PI * 2);
+    x.fill();
+    x.fillStyle = hatGradient(x, c, 22, 36);
+    x.beginPath();
+    x.ellipse(82, 27.5, 34, 7.5, 0.06, 0, Math.PI * 2);
+    x.fill();
+    hatHighlight(x, () => x.ellipse(76, 25.5, 23, 2.4, 0.04, 0, Math.PI * 2));
   } else if (id === 'hat_bucket') {
-    x.ellipse(52, 21, 39, 25, 0, Math.PI, 0);
-    x.fill();
+    hatCastShadow(x, 52, 37, 53, 7);
+    x.fillStyle = hatGradient(x, c, -16, 24);
     x.beginPath();
-    x.moveTo(13, 18);
-    x.lineTo(91, 18);
-    x.lineTo(108, 34);
-    x.lineTo(-4, 34);
+    x.moveTo(14, 25);
+    x.bezierCurveTo(16, -24, 88, -24, 90, 25);
     x.closePath();
     x.fill();
+    hatHighlight(x, () => { x.moveTo(24, 10); x.bezierCurveTo(30, -11, 62, -14, 73, -3); x.bezierCurveTo(54, -7, 37, -1, 24, 10); });
+    x.fillStyle = shadeColor(c, -0.34);
+    x.fillRect(14, 16, 76, 6.5);
+    x.fillStyle = hatGradient(x, c, 20, 40);
+    x.beginPath();
+    x.moveTo(14, 21);
+    x.lineTo(90, 21);
+    x.quadraticCurveTo(108, 28, 112, 39);
+    x.quadraticCurveTo(52, 47, -8, 39);
+    x.quadraticCurveTo(-4, 28, 14, 21);
+    x.fill();
+    x.strokeStyle = 'rgba(255,255,255,.5)';
+    x.lineWidth = 1.2;
+    x.setLineDash([4, 3.5]);
+    x.beginPath();
+    x.moveTo(-2, 36);
+    x.quadraticCurveTo(52, 44, 106, 36);
+    x.stroke();
+    x.setLineDash([]);
   } else if (id === 'hat_crown') {
-    x.moveTo(20, 24);
-    x.lineTo(16, -14);
-    x.lineTo(36, 4);
-    x.lineTo(53, -22);
-    x.lineTo(70, 4);
-    x.lineTo(90, -14);
-    x.lineTo(86, 24);
+    hatCastShadow(x, 53, 29, 38, 6);
+    x.fillStyle = hatGradient(x, c, -24, 28);
+    x.beginPath();
+    x.moveTo(17, 27);
+    x.lineTo(11, -13);
+    x.lineTo(33, 5);
+    x.lineTo(53, -25);
+    x.lineTo(73, 5);
+    x.lineTo(95, -13);
+    x.lineTo(89, 27);
     x.closePath();
     x.fill();
+    hatHighlight(x, () => { x.moveTo(53, -25); x.lineTo(64, -8); x.lineTo(48, 12); x.lineTo(34, 7); });
+    x.fillStyle = shadeColor(c, -0.3);
+    x.beginPath();
+    x.roundRect(14, 20, 78, 9, 3);
+    x.fill();
+    [[32, '#e8405a'], [53, '#3fb4ff'], [74, '#e8405a']].forEach(([gx, col]) => {
+      x.fillStyle = col;
+      x.beginPath();
+      x.arc(gx, 24.5, 3.6, 0, Math.PI * 2);
+      x.fill();
+      x.fillStyle = 'rgba(255,255,255,.75)';
+      x.beginPath();
+      x.arc(gx - 1, 23.4, 1.1, 0, Math.PI * 2);
+      x.fill();
+    });
+    [[11, -13], [53, -25], [95, -13]].forEach(([bx, by]) => {
+      x.fillStyle = '#fff3b0';
+      x.beginPath();
+      x.arc(bx, by, 3.6, 0, Math.PI * 2);
+      x.fill();
+    });
   }
 }
 
@@ -406,6 +520,7 @@ function drawGolfer(x, fx, fy, o) {
   const head = a[o.expr || 'head'];
   x.translate(-head.width / 2, -head.height + 12);
   x.drawImage(head, 0, 0);
+  x.translate(0, HAT_DROP[o.charId] || 0);
   drawHat(x, o.hatId);
   x.restore();
   x.restore();
