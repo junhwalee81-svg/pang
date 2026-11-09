@@ -12,10 +12,8 @@ for (const club of ['1W', '5I', 'SW', 'PT']) {
   if (!ok) bad++;
   console.log((ok ? 'OK  ' : 'FAIL') + ' ' + line);
 }
-if (typeof process.argv[2] === 'string') {
-  for (const name of ['tomahawk', 'spike']) {
-    const r = simulateShot({ club: '1W', power: 1, special: name });
-    console.log(`${name}: 캐리 ${r.carry.toFixed(1)}m 런 ${(r.total - r.carry).toFixed(1)}m 최고 ${r.apex.toFixed(1)}m`);
-  }
+for (const name of [null, 'tomahawk', 'spike']) {
+  const r = simulateShot({ club: '1W', power: 1, special: name });
+  console.log(`  ${name || '일반'}: 캐리 ${r.carry.toFixed(1)}m 런 ${(r.total - r.carry).toFixed(1)}m 최고 ${r.apex.toFixed(1)}m`);
 }
 process.exitCode = bad ? 1 : 0;

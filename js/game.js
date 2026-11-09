@@ -31,7 +31,7 @@ var G = {
   hole: null, holeIndex: 0, scores: [], strokes: 0, wind: 0,
   ball: null, lastX: 0, trail: [], trailFade: 1, fx: [],
   golfer: { x: 0, phi: 0, expr: 'head', pose: null, bob: 0 },
-  club: '1W', swingClub: null, angle: 0, spin: 0, markerX: null,
+  club: '1W', swingClub: null, angle: 0, spin: 0, special: null, markerX: null,
   gauge: { pos: 0, dir: 1, power: 0 },
   shot: null, shotStyle: null, stopT: 0, swingT: 0, launched: false, phiTop: 0,
   perfects: 0, introT: 0, holedT: 0, resultShown: false, penaltyMsg: null, accum: 0,
@@ -122,7 +122,7 @@ function lieMul(x, club) {
 function shotOptions(extra) {
   return Object.assign({
     club: G.club, power: 1, angle: G.angle, spin: G.spin, stats: G.stats, impact: 0,
-    hole: G.hole, x: G.ball.x, wind: 0, lie: lieMul(G.ball.x, G.club),
+    hole: G.hole, x: G.ball.x, wind: 0, lie: lieMul(G.ball.x, G.club), special: G.club === 'PT' ? null : G.special,
   }, extra || {});
 }
 
@@ -133,10 +133,21 @@ function recomputeMarker() {
   G.markerX = G.ball.x + r.carry;
 }
 
+function specialUnlocked() { return G.perfects >= SPECIAL_UNLOCK; }
+
+/** 샷 전에 특수샷을 고른다. 다시 누르면 해제 */
+function setSpecial(id) {
+  if (G.phase !== 'aim' || G.club === 'PT' || !specialUnlocked()) return;
+  G.special = G.special === id ? null : id;
+  recomputeMarker();
+  SFX.play('ui');
+}
+
 function readyShot() {
   G.phase = 'aim';
   G.angle = 0;
   G.spin = 0;
+  G.special = null;
   G.gauge.pos = 0;
   G.gauge.dir = 1;
   G.gauge.power = 0;
@@ -179,6 +190,7 @@ function setClub(id) {
   G.club = id;
   G.angle = 0;
   G.spin = 0;
+  if (id === 'PT') G.special = null;
   G.golfer.x = golferSpot();
   G.golfer.phi = clubRig(id).tilt;
   recomputeMarker();
@@ -236,26 +248,30 @@ function launchNow() {
   launchBall(G.ball, lp);
   G.env = shotEnv(Object.assign({}, o, { wind: G.wind }));
   G.strokes++;
-  G.shotStyle = lp.perfect ? 'perfect' : null;
+  G.shotStyle = o.special || (lp.perfect ? 'perfect' : null);
   G.trail = [];
   G.trailFade = 1;
   G.launched = true;
   G.accum = 0;
-  if (lp.perfect) onPerfect();
+  if (lp.perfect) onPerfect(o.special);
   else {
+    if (o.special) G.pop = { text: SPECIAL_SHOTS[o.special].name, t: 0.8, max: 0.8, fill: '#ffffff', stroke: 'rgba(40,20,110,.92)' };
     G.golfer.expr = lp.miss > 0.14 ? 'headShock' : 'head';
     SFX.play('hit');
     spawn('smoke', G.ball.x, G.ball.y + 0.2, 4, { color: '#f4f0d0', size: 34, speed: 3, life: 0.5, up: 1 });
   }
 }
 
-function onPerfect() {
+function onPerfect(special) {
+  const unlockedBefore = specialUnlocked();
   G.perfects++;
   G.coins += GAME.coinsPerfect;
   G.golfer.expr = 'head';
   G.flash = 0.62;
   G.shake = 9;
-  G.pop = { text: '팡!', sub: '퍼펙트 임팩트', t: 0.95, max: 0.95, big: true, color: 'rgba(255,214,90,.5)' };
+  const newly = !unlockedBefore && specialUnlocked();
+  const sub = special ? SPECIAL_SHOTS[special].name + ' 퍼펙트' : newly ? '특수샷 해금!' : '퍼펙트 임팩트';
+  G.pop = { text: '팡!', sub, t: 0.95, max: 0.95, big: true, color: 'rgba(255,214,90,.5)' };
   SFX.play('hitPerfect');
   spawn('star', G.ball.x, G.ball.y + 0.3, 16, { color: '#ffe066', size: 26, speed: 11, life: 0.75, add: true });
   spawn('ring', G.ball.x, G.ball.y + 0.3, 1, { color: '#ffffff', size: 60, speed: 0, life: 0.42, add: true, grow: 5 });
@@ -356,6 +372,12 @@ function updateBall(dt) {
 function handleBallEvent(ev) {
   if (ev.kind === 'bounce') {
     SFX.play('bounce');
+    if (G.ball.bounces === 1 && SPECIAL_SHOTS[G.shotStyle]) {
+      const sp = SPECIAL_SHOTS[G.shotStyle];
+      spawn('ring', ev.x, ev.y + 0.1, 1, { color: sp.glow, size: 46, speed: 0, life: 0.5, grow: 4, add: true });
+      spawn('spark', ev.x, ev.y + 0.2, 14, { color: sp.glow, size: 22, speed: 10, life: 0.55, up: 3, add: true });
+      G.shake = Math.max(G.shake, G.shotStyle === 'tomahawk' ? 8 : 4);
+    }
     const c = ev.surface === 'bunker' ? '#f5dfa6' : ev.surface === 'green' ? '#d8ffae' : '#c9e88a';
     spawn('smoke', ev.x, ev.y + 0.1, Math.min(9, 3 + (ev.speed | 0)), { color: c, size: 34, speed: 3.6, life: 0.62, up: 2.4 });
   } else if (ev.kind === 'water') {

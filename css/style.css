@@ -45,6 +45,15 @@ button:disabled { cursor: default; }
 .tune button:active { background: rgba(255, 255, 255, .34); }
 .spinBall { position: relative; width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle at 36% 30%, #fff, #c8d4df); flex: none; box-shadow: inset -2px -3px 5px rgba(50, 70, 100, .32); }
 .spinBall i { position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px; border-radius: 50%; background: #ec4a48; transition: transform .12s; }
+.rowSpecial { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; min-height: 38px; }
+.specialLock { grid-column: 1 / 3; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; opacity: .72; background: rgba(255, 255, 255, .05); border: 1px dashed rgba(255, 255, 255, .22); border-radius: 11px; }
+.special { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.12; padding: 3px 2px; border-radius: 11px; background: linear-gradient(180deg, rgba(90, 170, 255, .34), rgba(40, 90, 200, .34)); border: 1.5px solid rgba(120, 220, 255, .5); }
+.special.tomahawk { background: linear-gradient(180deg, rgba(255, 110, 190, .34), rgba(150, 60, 220, .34)); border-color: rgba(255, 150, 215, .55); }
+.special b { font-size: 13px; font-weight: 900; }
+.special small { font-size: 10px; opacity: .82; white-space: nowrap; }
+.special.on { background: linear-gradient(180deg, #8ef2ff, #2c9cf5); color: #042447; border-color: #fff; box-shadow: 0 0 12px rgba(100, 225, 255, .75); }
+.special.tomahawk.on { background: linear-gradient(180deg, #ffa8dc, #bb55ec); color: #3a0a4a; box-shadow: 0 0 12px rgba(255, 130, 215, .75); }
+.special:disabled:not(.on) { opacity: .5; }
 .rowShot { display: grid; grid-template-columns: 1fr 104px; gap: 8px; align-items: stretch; }
 #gauge { position: relative; height: 54px; border-radius: 14px; overflow: hidden; background: linear-gradient(180deg, #0a1732, #1c2f58); border: 2px solid rgba(255, 255, 255, .34); box-shadow: inset 0 3px 8px rgba(0, 0, 0, .5); }
 #gFill { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, #38d6c0 0%, #ffe066 62%, #ff6b4a 100%); opacity: .94; }

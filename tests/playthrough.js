@@ -73,6 +73,23 @@ async function run(width, height, name) {
   await page.evaluate(() => placeBall(G.hole.cup - 150));
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(OUT, name + '_10hole2.png') });
+  // 특수샷: 해금 전 잠김, 2회 후 선택 가능, 샷이 끝까지 진행
+  const special = await page.evaluate(() => {
+    G.perfects = 1; setSpecial('tomahawk');
+    const locked = G.special === null;
+    G.perfects = 2; setClub('5I'); setSpecial('tomahawk');
+    const hi = simulateShot(shotOptions()); setSpecial('spike');
+    const lo = simulateShot(shotOptions());
+    return { locked, pick: G.special, hiApex: hi.apex, loApex: lo.apex, hiRun: hi.total - hi.carry, loRun: lo.total - lo.carry };
+  });
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: path.join(OUT, name + '_12special.png') });
+  await page.evaluate(() => { window.__speed = 6; });
+  await shoot(page, 0.7, 0);
+  await waitPhase(page, ['stopped', 'holed']);
+  console.log('special', JSON.stringify(special));
+  if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
+  await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
   await page.evaluate(() => openShop());
   await page.waitForTimeout(150);
   await page.screenshot({ path: path.join(OUT, name + '_11shop.png') });

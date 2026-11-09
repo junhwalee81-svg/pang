@@ -384,6 +384,7 @@ function drawGolferLayer(c) {
 }
 
 function trailColor(G) {
+  if (SPECIAL_SHOTS[G.shotStyle]) return SPECIAL_SHOTS[G.shotStyle].trail;
   if (G.shotStyle === 'perfect') return ['255,214,84', '255,120,50'];
   return ['255,255,255', '180,225,255'];
 }
@@ -419,8 +420,8 @@ function drawBall(c) {
   x.beginPath();
   x.ellipse(px, gy + 1, r * (1 + alt * 0.003), r * 0.32, 0, 0, Math.PI * 2);
   x.fill();
-  if (G.shotStyle === 'perfect' && b.mode !== 'stop') {
-    const glow = tintedFx('light', '#ffd25a');
+  if (G.shotStyle && b.mode !== 'stop') {
+    const glow = tintedFx('light', SPECIAL_SHOTS[G.shotStyle] ? SPECIAL_SHOTS[G.shotStyle].glow : '#ffd25a');
     x.globalCompositeOperation = 'lighter';
     x.drawImage(glow, px - r * 5, py - r - r * 4.3, r * 10, r * 10);
     x.globalCompositeOperation = 'source-over';

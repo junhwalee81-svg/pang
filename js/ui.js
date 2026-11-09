@@ -41,6 +41,15 @@ function buildControls() {
     box.appendChild(b);
   });
   const bind = (id, fn) => $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); fn(); });
+  const row = $('specials');
+  SPECIAL_ORDER.forEach((id) => {
+    const b = document.createElement('button');
+    b.className = 'special';
+    b.dataset.special = id;
+    b.innerHTML = '<b>' + SPECIAL_SHOTS[id].name + '</b><small>' + SPECIAL_SHOTS[id].desc + '</small>';
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); setSpecial(id); });
+    row.appendChild(b);
+  });
   bind('angleDown', () => setAngle(-1));
   bind('angleUp', () => setAngle(1));
   bind('spinTop', () => setSpin(-0.25));
@@ -54,6 +63,8 @@ function buildControls() {
   window.addEventListener('keydown', (e) => {
     if ($('modal').classList.contains('show') || $('title').classList.contains('show')) return;
     SFX.unlock();
+    if (e.code === 'KeyQ') setSpecial('tomahawk');
+    if (e.code === 'KeyE') setSpecial('spike');
     if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (!e.repeat) pressShot(); }
     else if (e.code === 'ArrowUp') setAngle(1);
     else if (e.code === 'ArrowDown') setAngle(-1);
@@ -98,8 +109,17 @@ function syncHud() {
     b.disabled = !canAdjust;
     setText(b.querySelector('small'), clubReach(id));
   });
+  const unlocked = specialUnlocked();
+  $('specialLock').classList.toggle('hide', unlocked);
+  setText($('specialLock'), '🔒 이번 홀 팡 ' + Math.min(G.perfects, SPECIAL_UNLOCK) + '/' + SPECIAL_UNLOCK + ' — 2회면 특수샷 해금');
+  document.querySelectorAll('.special').forEach((b) => {
+    b.classList.toggle('hide', !unlocked);
+    b.classList.toggle('on', G.special === b.dataset.special);
+    b.classList.toggle('tomahawk', b.dataset.special === 'tomahawk');
+    b.disabled = !canAdjust || G.club === 'PT';
+  });
   const c = CLUB_TYPES[G.club];
-  setText($('angleV'), G.club === 'PT' ? '–' : Math.round(c.loft + G.angle) + '°');
+  setText($('angleV'), G.club === 'PT' ? '–' : Math.round(c.loft + G.angle + (G.special ? SPECIAL_SHOTS[G.special].loftAdd : 0)) + '°');
   setText($('spinV'), G.club === 'PT' ? '–' : spinLabel());
   $('spinDot').style.transform = 'translateY(' + (-G.spin * -11) + 'px)';
   $('shot').disabled = !(canAdjust || G.phase === 'power' || G.phase === 'impact' || G.phase === 'intro');

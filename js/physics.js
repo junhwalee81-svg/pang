@@ -172,11 +172,12 @@ function launchFrom(o) {
     const v = c.v0 * Math.sqrt(clamp(o.power, 0, 1));
     return { v: v * (1 + Math.sign(err) * miss * PHYS.puttErr), ang: 0, spin: 0, perfect, miss, putt: true };
   }
-  let v = c.v0 * Math.pow(clamp(o.power, 0.02, 1), PHYS.powerExp) * f.powerMul;
+  const sp = SPECIAL_SHOTS[o.special] || null;
+  let v = c.v0 * Math.pow(clamp(o.power, 0.02, 1), PHYS.powerExp) * f.powerMul * (sp ? sp.speedMul : 1);
   if (perfect) v *= PHYS.perfectBoost;
   v *= (o.lie || 1) * (1 - clamp(miss * PHYS.errSpeed, 0, 0.6));
-  const ang = c.loft + (o.angle || 0) + Math.sign(err) * miss * PHYS.errAngle;
-  const spin = (c.spin + (o.spin || 0) * c.spinCtl * f.spinMul) * (1 - clamp(miss * PHYS.errSpin, 0, 0.8));
+  const ang = c.loft + (o.angle || 0) + (sp ? sp.loftAdd : 0) + Math.sign(err) * miss * PHYS.errAngle;
+  const spin = (c.spin + (sp ? sp.spinAdd : 0) + (o.spin || 0) * c.spinCtl * f.spinMul) * (1 - clamp(miss * PHYS.errSpin, 0, 0.8));
   return { v, ang, spin, perfect, miss, putt: false };
 }
 
@@ -316,7 +317,7 @@ function rollBall(b, hole, env, dt, prevX) {
   const surf = TERRAIN[type];
   const s = slopeAt(hole, b.x);
   const slopeAcc = -PHYS.g * s / Math.hypot(1, s);
-  const mu = surf.mu * (type === 'green' ? 1 : b.rollMu);
+  const mu = surf.mu * b.rollMu;
   const fric = mu * PHYS.g;
   let v = b.vx;
   const moving = Math.abs(v) > PHYS.stopSpeed;
@@ -366,7 +367,8 @@ function simulateShot(o) {
 
 /** 샷 옵션 → 공 진행 환경 */
 function shotEnv(o) {
-  return { wind: o.wind || 0, windMul: o.windMul == null ? 1 : o.windMul };
+  const sp = SPECIAL_SHOTS[o.special] || null;
+  return { wind: o.wind || 0, windMul: o.windMul == null ? 1 : o.windMul, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
 }
 
 if (typeof module !== 'undefined') {

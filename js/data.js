@@ -10,6 +10,15 @@ var CLUB_TYPES = {
 };
 var CLUB_ORDER = ['1W', '5I', 'SW', 'PT'];
 
+// 특수샷. loftAdd: 발사각 추가(도), speedMul: 속도 배율, spinAdd: 스핀 추가
+// restMul·tangMul: 첫 착지 반발·수평 유지 배율, muMul: 구름 저항 배율
+var SPECIAL_UNLOCK = 2; // 같은 홀에서 이만큼 팡을 내면 해금
+var SPECIAL_SHOTS = {
+  tomahawk: { name: '토마호크', desc: '고탄도 · 착지 후 거의 안 구름', loftAdd: 18, speedMul: 0.86, spinAdd: 0.05, restMul: 0.3, tangMul: 0.16, muMul: 6, trail: ['255,105,180', '170,80,255'], glow: '#ff78c8' },
+  spike: { name: '스파이크', desc: '저탄도 · 강한 런', loftAdd: -4, speedMul: 1, spinAdd: -0.1, restMul: 1, tangMul: 1.15, muMul: 0.55, trail: ['110,240,255', '50,140,255'], glow: '#6ee8ff' },
+};
+var SPECIAL_ORDER = ['tomahawk', 'spike'];
+
 var STAT_KEYS = ['power', 'control', 'impact', 'spin'];
 var STAT_NAMES = { power: '파워', control: '컨트롤', impact: '임팩트', spin: '스핀' };
 
@@ -86,5 +95,5 @@ var HOLES = [
 ];
 
 if (typeof module !== 'undefined') {
-  Object.assign(globalThis, { CLUB_TYPES, CLUB_ORDER, STAT_KEYS, STAT_NAMES, SLOT_ORDER, SLOT_NAMES, ITEMS, DEFAULT_EQUIP, THEMES, HOLES });
+  Object.assign(globalThis, { SPECIAL_UNLOCK, SPECIAL_SHOTS, SPECIAL_ORDER, CLUB_TYPES, CLUB_ORDER, STAT_KEYS, STAT_NAMES, SLOT_ORDER, SLOT_NAMES, ITEMS, DEFAULT_EQUIP, THEMES, HOLES });
 }
