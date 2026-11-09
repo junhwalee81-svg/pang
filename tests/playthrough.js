@@ -92,7 +92,7 @@ async function run(width, height, name) {
   await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
   // 합성음: 오프라인으로 렌더해 무음·찢어짐이 없는지 측정
   const audio = await page.evaluate(async () => {
-    const list = [['whoosh'], ['hit', '1W'], ['hit', '5I'], ['hit', 'SW'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'fairway'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['lip'], ['coin'], ['fanfare']];
+    const list = [['whoosh'], ['hit', '1W'], ['hit', '5I'], ['hit', 'SW'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'fairway'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['lip'], ['rock'], ['coin'], ['fanfare']];
     const out = {};
     for (const [name, arg] of list) {
       const ctx = new OfflineAudioContext(1, 44100 * 1.8, 44100);

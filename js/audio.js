@@ -160,6 +160,11 @@ var SFX = {
         });
         break;
       }
+      case 'rock':
+        this.burst(ctx, out, t, 'highpass', 2400, 1600, 0.8, 0.018, 0.9);
+        this.sweep(ctx, out, t, 'triangle', 1900, 1180, 0.05, 0.42);
+        this.sweep(ctx, out, t, 'sine', 3600, 3100, 0.035, 0.18);
+        break;
       case 'lip':
         this.burst(ctx, out, t, 'bandpass', 2000, 1400, 3, 0.025, 0.5);
         this.sweep(ctx, out, t, 'triangle', 1200, 700, 0.05, 0.3);

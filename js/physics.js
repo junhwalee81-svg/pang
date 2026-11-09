@@ -38,6 +38,18 @@ var HAZARD = {
   greenMargin: 4,         // 그린 둘레 이 거리(m)까지는 요철 없음
   patchCount: [2, 4],     // 페어웨이의 단단한 땅·질퍽한 땅 수
   patchLen: [8, 20],      // 그 길이(m)
+  rockCount: { 3: [2, 3], 4: [3, 5], 5: [5, 8] }, // 파별 돌 개수
+  rockR: [0.45, 1.05],    // 돌 반지름(m)
+  rockHeight: 1.35,       // 반지름의 이 배 높이까지 공이 부딪힘
+  rockForward: 0.55,      // 앞으로 튈 확률(나머지는 뒤로)
+  rockForwardKeep: [0.45, 0.85], // 앞으로 튈 때 속도 유지율
+  rockBackKeep: [0.15, 0.45],    // 뒤로 튈 때 속도 유지율
+  rockLift: [0.2, 0.55],  // 속도 대비 위로 튀는 비율
+  rockCooldown: 0.22,     // 연속 충돌 방지(초)
+  rockMinSpeed: 2.5,      // 이보다 느리면 그냥 멈칫한다
+  placeGap: 9,            // 장애물끼리의 최소 간격(m)
+  placeClear: 4,          // 해저드·그린·티에서 떨어질 거리(m)
+  graceTime: 0.12,        // 친 직후 충돌을 무시하는 시간(초)
 };
 
 // rest: 반발, tang: 튈 때 수평 유지율, mu: 구름 저항, grip: 백스핀 적용 비율, hold: 정지 경사 한계
@@ -90,7 +102,39 @@ function rollHoleLayout(hole, seed) {
   hole.table = null;
   hole.layout = { seed, bumps, patches, rocks: [], trees: [] };
   prepareHole(hole);
+  placeRocks(hole, rng);
   return hole.layout;
+}
+
+/** x 주변이 장애물을 놓아도 되는 땅인지 */
+function canPlaceAt(hole, x, used) {
+  if (x < 24 || x > hole.end - 6) return false;
+  if (used.some((u) => Math.abs(u - x) < HAZARD.placeGap)) return false;
+  for (let d = -HAZARD.placeClear; d <= HAZARD.placeClear; d += 1) {
+    const s = surfaceAt(hole, x + d);
+    if (s === 'water' || s === 'bunker' || s === 'green' || s === 'tee') return false;
+  }
+  return true;
+}
+
+function pickSpots(hole, rng, count, used, from, to) {
+  const spots = [];
+  for (let tries = 0; tries < count * 40 && spots.length < count; tries++) {
+    const x = from + rng() * (to - from);
+    if (!canPlaceAt(hole, x, used)) continue;
+    used.push(x);
+    spots.push(x);
+  }
+  return spots;
+}
+
+function placeRocks(hole, rng) {
+  const L = hole.layout;
+  L.used = L.used || [];
+  const count = Math.round(rangeOf(rng, HAZARD.rockCount[hole.par]));
+  L.rocks = pickSpots(hole, rng, count, L.used, 24, hole.end - 6).map((x) => ({
+    x, r: rangeOf(rng, HAZARD.rockR), kind: 'rock' + (1 + ((rng() * 3) | 0)),
+  }));
 }
 
 function applyBumps(hole, h, type, n) {
@@ -258,7 +302,7 @@ function launchFrom(o) {
 }
 
 function makeBall(x, y) {
-  return { x, y, vx: 0, vy: 0, spin: 0, t: 0, mode: 'stop', rot: 0, startX: x, carryX: null, apex: y, bounces: 0, rollMu: 1, lipUntil: 0, seed: 1, events: [], holed: false };
+  return { x, y, vx: 0, vy: 0, spin: 0, t: 0, mode: 'stop', rot: 0, startX: x, carryX: null, apex: y, bounces: 0, rollMu: 1, lipUntil: 0, rockUntil: 0, seed: 1, events: [], holed: false };
 }
 
 function launchBall(b, lp) {
@@ -274,6 +318,7 @@ function launchBall(b, lp) {
   b.events.length = 0;
   b.holed = false;
   b.lipUntil = 0;
+  b.rockUntil = 0;
   b.mode = lp.putt ? 'roll' : 'air';
   b.rollMu = 1;
 }
@@ -339,7 +384,54 @@ function stepBall(b, hole, env, dt) {
   } else {
     rollBall(b, hole, env, dt, prevX);
   }
+  hazardStep(b, hole, env, prevX);
   if (b.t > PHYS.maxBallTime && b.mode !== 'stop') { b.mode = 'stop'; emit(b, 'stop', surfaceAt(hole, b.x), 0); }
+}
+
+/** 돌·나무와 부딪히는지 검사한다 */
+function hazardStep(b, hole, env, prevX) {
+  if (hole.flat || !hole.layout || env.ignoreHazards) return;
+  if (b.mode === 'stop') {
+    if (!b.holed) settleOffRock(b, hole);
+    return;
+  }
+  if (b.t < HAZARD.graceTime) return;
+  hitRocks(b, hole, prevX);
+}
+
+function hitRocks(b, hole, prevX) {
+  if (b.t < b.rockUntil) return;
+  for (const rock of hole.layout.rocks) {
+    if (Math.min(prevX, b.x) > rock.x + rock.r || Math.max(prevX, b.x) < rock.x - rock.r) continue;
+    const gy = heightAt(hole, rock.x);
+    if (b.y - gy > rock.r * HAZARD.rockHeight) continue;
+    const speed = Math.hypot(b.vx, b.vy);
+    b.rockUntil = b.t + HAZARD.rockCooldown;
+    if (b.carryX === null) b.carryX = b.x;
+    emit(b, 'rock', surfaceAt(hole, b.x), speed);
+    if (speed < HAZARD.rockMinSpeed) {
+      b.vx *= -0.25;
+      return;
+    }
+    const forward = ballRand(b) < HAZARD.rockForward;
+    const keep = lerp.apply(null, (forward ? HAZARD.rockForwardKeep : HAZARD.rockBackKeep).concat(ballRand(b)));
+    b.vx *= forward ? keep : -keep;
+    b.vy = speed * lerp(HAZARD.rockLift[0], HAZARD.rockLift[1], ballRand(b));
+    b.y = Math.max(b.y, gy + rock.r * 0.9);
+    b.spin *= 0.3;
+    b.mode = 'air';
+    return;
+  }
+}
+
+/** 돌 위에 멈추면 옆으로 내려 준다 */
+function settleOffRock(b, hole) {
+  for (const rock of hole.layout.rocks) {
+    if (Math.abs(b.x - rock.x) >= rock.r) continue;
+    b.x = rock.x + (b.x >= rock.x ? 1 : -1) * (rock.r + 0.12);
+    b.y = heightAt(hole, b.x);
+    return;
+  }
 }
 
 function tryCupAir(b, hole, prevX, env, gy) {
@@ -451,7 +543,7 @@ function simulateShot(o) {
 /** 샷 옵션 → 공 진행 환경 */
 function shotEnv(o) {
   const sp = SPECIAL_SHOTS[o.special] || null;
-  return { wind: o.wind || 0, windMul: o.windMul == null ? 1 : o.windMul, backMul: o.backMul || 1, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
+  return { wind: o.wind || 0, windMul: o.windMul == null ? 1 : o.windMul, backMul: o.backMul || 1, ignoreHazards: !!o.ignoreHazards, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
 }
 
 if (typeof module !== 'undefined') {

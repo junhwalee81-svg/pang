@@ -34,6 +34,7 @@ function renderGame(x, G) {
   if (G.hole) drawSlopeArrows(ctx);
   drawCupAndFlag(ctx);
   if (G.hole) {
+    drawHazards(ctx);
     drawMarkers(ctx);
     drawGolferLayer(ctx);
   }
@@ -388,6 +389,26 @@ function drawCupAndFlag(c) {
   x.fill();
 }
 
+/** 공이 실제로 부딪히는 장애물 */
+function drawHazards(c) {
+  const { x, cam, hole, sx, sy } = c;
+  if (!hole.layout) return;
+  const margin = 240;
+  for (const rock of hole.layout.rocks) {
+    const px = sx(rock.x);
+    if (px < -margin || px > c.W + margin) continue;
+    const im = ART.scene[rock.kind];
+    const h = rock.r * 1.75 * cam.z;
+    const w = (h * im.width) / im.height;
+    const y = sy(heightAt(hole, rock.x)) + 3;
+    x.fillStyle = 'rgba(14,44,24,.3)';
+    x.beginPath();
+    x.ellipse(px, y - 1, w * 0.55, Math.max(2.5, h * 0.12), 0, 0, Math.PI * 2);
+    x.fill();
+    x.drawImage(im, px - w / 2, y - h, w, h);
+  }
+}
+
 function drawMarkers(c) {
   const { x, G, hole, sx, sy } = c;
   if (G.phase !== 'aim' && G.phase !== 'power' && G.phase !== 'impact') return;
@@ -574,6 +595,14 @@ function drawMinimap(c) {
   if (G.markerX != null && G.club !== 'PT' && (G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact')) {
     x.fillStyle = '#ffe97a';
     x.fillRect(px(G.markerX) - 1, my + 3, 2, mh - 6);
+  }
+  if (hole.layout) {
+    x.fillStyle = '#d7dde4';
+    for (const rock of hole.layout.rocks) {
+      x.beginPath();
+      x.arc(px(rock.x), py(heightAt(hole, rock.x)) - 2, 2.2, 0, Math.PI * 2);
+      x.fill();
+    }
   }
   const fx = px(hole.cup), fy = py(heightAt(hole, hole.cup));
   x.strokeStyle = '#ffffff';

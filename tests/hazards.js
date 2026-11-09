@@ -48,6 +48,34 @@ for (let i = 0; i < 6 * 60; i++) {
 }
 check('무작위 샷 정상 종료', finished === total, finished + '/' + total);
 
+// 돌: 금지 구역 밖에만 놓이고, 맞으면 앞뒤로 갈린다. 마커는 무시한다
+for (const h of HOLES) {
+  rollHoleLayout(h, 4242);
+  const R = h.layout.rocks;
+  const okPlace = R.every((r) => !['water', 'bunker', 'green', 'tee'].includes(surfaceAt(h, r.x)));
+  check(h.name + ' 돌 배치', R.length >= 2 && okPlace, R.length + '개');
+}
+const hr = HOLES[0];
+rollHoleLayout(hr, 11);
+hr.layout.rocks = [{ x: 150, r: 1, kind: 'rock1' }];
+let back = 0, fwd = 0, inside = 0;
+for (let s = 1; s <= 60; s++) {
+  const b = makeBall(140, heightAt(hr, 140));
+  b.seed = Math.imul(s, 2654435761) | 1;
+  launchBall(b, { v: 18, ang: 0, spin: 0, perfect: false, miss: 0, putt: true });
+  const env = shotEnv({});
+  let g = 0;
+  while (b.mode !== 'stop' && g++ < 5000) stepBall(b, hr, env, PHYS.dt);
+  if (b.x < 150) back++; else fwd++;
+  if (Math.abs(b.x - 150) < 1) inside++;
+}
+check('돌에 맞으면 앞뒤로 갈림', back > 5 && fwd > 5, '뒤 ' + back + ' / 앞 ' + fwd);
+check('돌 위에 멈추지 않음', inside === 0);
+const noHz = simulateShot({ club: 'SW', hole: hr, x: 148, seed: 3, ignoreHazards: true });
+hr.layout.rocks = [];
+const clear = simulateShot({ club: 'SW', hole: hr, x: 148, seed: 3 });
+check('마커는 장애물 무시', Math.abs(noHz.carry - clear.carry) < 1e-6);
+
 report();
 
 function report() {

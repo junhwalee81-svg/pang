@@ -141,7 +141,7 @@ function shotOptions(extra) {
 function recomputeMarker() {
   if (!G.hole || !G.ball) return;
   if (G.club === 'PT') { G.markerX = null; return; }
-  const r = simulateShot(shotOptions({ wind: currentPassive().kind === 'windMarker' ? G.wind : 0 }));
+  const r = simulateShot(shotOptions({ ignoreHazards: true, wind: currentPassive().kind === 'windMarker' ? G.wind : 0 }));
   G.markerX = G.ball.x + r.carry;
 }
 
@@ -405,6 +405,12 @@ function handleBallEvent(ev) {
     spawn('ring', ev.x, y + 0.1, 2, { color: '#ffffff', size: 40, speed: 0, life: 0.7, grow: 3, add: true });
   } else if (ev.kind === 'cup') {
     SFX.play('cup');
+  } else if (ev.kind === 'rock') {
+    SFX.play('rock');
+    spawn('spark', ev.x, ev.y + 0.3, 10, { color: '#fff1c2', size: 16, speed: 9, life: 0.4, up: 3, add: true });
+    spawn('smoke', ev.x, ev.y + 0.2, 4, { color: '#cfd4da', size: 24, speed: 3, life: 0.5, up: 1.5 });
+    G.shake = Math.max(G.shake, 5);
+    if (!G.pop && ev.speed >= HAZARD.rockMinSpeed) G.pop = { text: '딱!', t: 0.6, max: 0.6, fill: '#ffffff', stroke: 'rgba(40,50,70,.92)' };
   } else if (ev.kind === 'lip') {
     SFX.play('lip');
   }

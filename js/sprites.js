@@ -198,8 +198,8 @@ function holeDecor(hole) {
       const s = surfaceAt(hole, x);
       if (s === 'water' || s === 'bunker' || s === 'green' || s === 'tee') continue;
       const r = rng();
-      const kind = r < 0.34 ? t.bushes[(rng() * t.bushes.length) | 0] : r < 0.6 ? 'tuft' + (1 + ((rng() * 3) | 0)) : r < 0.86 ? ['flowerBlue', 'flowerPurple', 'flowerRed'][(rng() * 3) | 0] : 'rock' + (1 + ((rng() * 3) | 0));
-      const big = kind.startsWith('bush') ? 1.7 : kind.startsWith('rock') ? 1.2 : 0.8;
+      const kind = r < 0.36 ? t.bushes[(rng() * t.bushes.length) | 0] : r < 0.68 ? 'tuft' + (1 + ((rng() * 3) | 0)) : ['flowerBlue', 'flowerPurple', 'flowerRed'][(rng() * 3) | 0];
+      const big = kind.startsWith('bush') ? 1.7 : 0.8;
       front.push({ x, kind, h: big + rng() * big * 0.6 });
     }
     return { back, front };
