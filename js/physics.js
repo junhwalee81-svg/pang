@@ -47,6 +47,16 @@ var HAZARD = {
   rockLift: [0.2, 0.55],  // 속도 대비 위로 튀는 비율
   rockCooldown: 0.22,     // 연속 충돌 방지(초)
   rockMinSpeed: 2.5,      // 이보다 느리면 그냥 멈칫한다
+  treeCount: { 3: [1, 2], 4: [2, 4], 5: [3, 6] }, // 파별 코스 안 나무 수
+  treeH: [7.5, 12.5],     // 나무 높이(m)
+  treeHalfWidth: 0.24,    // 잎 부분 절반 폭 = 높이 × 값
+  canopyBase: 0.34,       // 잎이 시작하는 높이 비율
+  canopyPass: 0.22,       // 잎 사이로 그냥 빠져나갈 확률
+  canopySlow: [0.22, 0.55], // 잎에 걸렸을 때 수평 속도 유지율
+  trunkHalf: 0.3,         // 줄기 절반 폭(m)
+  trunkChance: 0.4,       // 잎 아래로 지나는 공이 줄기에 맞을 확률
+  trunkBack: [0.2, 0.5],  // 줄기에 맞고 되튀는 속도 비율
+  treeClearGreen: 8,      // 그린 앞 이 거리(m) 안에는 나무 없음
   placeGap: 9,            // 장애물끼리의 최소 간격(m)
   placeClear: 4,          // 해저드·그린·티에서 떨어질 거리(m)
   graceTime: 0.12,        // 친 직후 충돌을 무시하는 시간(초)
@@ -103,6 +113,7 @@ function rollHoleLayout(hole, seed) {
   hole.layout = { seed, bumps, patches, rocks: [], trees: [] };
   prepareHole(hole);
   placeRocks(hole, rng);
+  placeTrees(hole, rng);
   return hole.layout;
 }
 
@@ -126,6 +137,16 @@ function pickSpots(hole, rng, count, used, from, to) {
     spots.push(x);
   }
   return spots;
+}
+
+function placeTrees(hole, rng) {
+  const L = hole.layout;
+  const kinds = THEMES[hole.theme].trees;
+  const count = Math.round(rangeOf(rng, HAZARD.treeCount[hole.par]));
+  L.trees = pickSpots(hole, rng, count, L.used, 34, hole.green.from - HAZARD.treeClearGreen).map((x) => {
+    const h = rangeOf(rng, HAZARD.treeH);
+    return { x, h, r: h * HAZARD.treeHalfWidth, kind: kinds[(rng() * kinds.length) | 0] };
+  });
 }
 
 function placeRocks(hole, rng) {
@@ -302,7 +323,7 @@ function launchFrom(o) {
 }
 
 function makeBall(x, y) {
-  return { x, y, vx: 0, vy: 0, spin: 0, t: 0, mode: 'stop', rot: 0, startX: x, carryX: null, apex: y, bounces: 0, rollMu: 1, lipUntil: 0, rockUntil: 0, seed: 1, events: [], holed: false };
+  return { x, y, vx: 0, vy: 0, spin: 0, t: 0, mode: 'stop', rot: 0, startX: x, carryX: null, apex: y, bounces: 0, rollMu: 1, lipUntil: 0, rockUntil: 0, seed: 1, hitTrees: [], events: [], holed: false };
 }
 
 function launchBall(b, lp) {
@@ -319,6 +340,7 @@ function launchBall(b, lp) {
   b.holed = false;
   b.lipUntil = 0;
   b.rockUntil = 0;
+  b.hitTrees = [];
   b.mode = lp.putt ? 'roll' : 'air';
   b.rollMu = 1;
 }
@@ -329,7 +351,7 @@ function ballRand(b) {
   return ((b.seed >>> 8) & 0xffff) / 65536;
 }
 
-function emit(b, kind, surface, speed) { b.events.push({ kind, surface, speed, x: b.x, y: b.y }); }
+function emit(b, kind, surface, speed, treeX) { b.events.push({ kind, surface, speed, x: b.x, y: b.y, treeX }); }
 
 function tryCup(b, hole, prevX, env) {
   if (hole.flat) return false;
@@ -397,6 +419,44 @@ function hazardStep(b, hole, env, prevX) {
   }
   if (b.t < HAZARD.graceTime) return;
   hitRocks(b, hole, prevX);
+  hitTrees(b, hole, prevX);
+}
+
+function hitTrees(b, hole, prevX) {
+  const trees = hole.layout.trees;
+  for (let i = 0; i < trees.length; i++) {
+    const t = trees[i];
+    if (b.hitTrees.includes(i) || Math.abs(b.x - t.x) > t.r + 1) continue;
+    const gy = heightAt(hole, t.x);
+    const rel = b.y - gy;
+    const base = t.h * HAZARD.canopyBase;
+    if (rel < base) {
+      const crossed = (prevX - t.x) * (b.x - t.x) <= 0 || Math.abs(b.x - t.x) < HAZARD.trunkHalf;
+      if (!crossed) continue;
+      b.hitTrees.push(i);
+      if (ballRand(b) >= HAZARD.trunkChance) continue; // 옆으로 비껴 지나감
+      const speed = Math.hypot(b.vx, b.vy);
+      emit(b, 'trunk', surfaceAt(hole, b.x), speed, t.x);
+      b.vx *= -lerp(HAZARD.trunkBack[0], HAZARD.trunkBack[1], ballRand(b));
+      b.x = t.x + Math.sign(b.vx || -1) * (HAZARD.trunkHalf + 0.05);
+      b.spin *= 0.2;
+      if (b.carryX === null) b.carryX = b.x;
+      continue;
+    }
+    if (b.mode !== 'air') continue;
+    const ry = (t.h - base) / 2;
+    const u = (b.x - t.x) / t.r, v = (rel - (base + ry)) / ry;
+    if (u * u + v * v > 1) continue;
+    b.hitTrees.push(i);
+    if (ballRand(b) < HAZARD.canopyPass) {
+      emit(b, 'tree', 'pass', Math.hypot(b.vx, b.vy), t.x);
+      continue;
+    }
+    emit(b, 'tree', 'hit', Math.hypot(b.vx, b.vy), t.x);
+    b.vx *= lerp(HAZARD.canopySlow[0], HAZARD.canopySlow[1], ballRand(b));
+    b.vy = b.vy * 0.35 + (ballRand(b) - 0.6) * 4;
+    b.spin *= 0.3;
+  }
 }
 
 function hitRocks(b, hole, prevX) {

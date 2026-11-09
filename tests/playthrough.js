@@ -90,9 +90,32 @@ async function run(width, height, name) {
   console.log('special', JSON.stringify(special));
   if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
   await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
+  // 장애물: 돌·나무가 화면에 보이고, 게임 안에서 충돌 이벤트가 처리되는지
+  await page.evaluate(() => {
+    if (!['aim', 'stopped', 'intro', 'ball'].includes(G.phase)) readyNextShot();
+    const L = G.hole.layout;
+    placeBall(L.rocks[0].x - 9);
+    L.trees.push({ x: G.ball.x + 34, h: 30, r: 14, kind: L.trees[0].kind });
+    window.__ev = [];
+    const orig = window.handleBallEvent;
+    window.handleBallEvent = (e) => { window.__ev.push(e.kind); orig(e); };
+    setClub('5I');
+    window.__speed = 1;
+  });
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: path.join(OUT, name + '_14hazard.png') });
+  await shoot(page, 1, 0.1);
+  await page.waitForFunction(() => window.__ev.includes('tree') || G.phase === 'stopped', null, { timeout: 15000 });
+  await page.waitForTimeout(160);
+  await page.screenshot({ path: path.join(OUT, name + '_15treehit.png') });
+  await page.evaluate(() => { window.__speed = 6; });
+  await waitPhase(page, ['stopped', 'holed']);
+  const hazardEvents = await page.evaluate(() => { const list = window.__ev.slice(); G.hole.layout.trees.pop(); readyNextShot(); window.__speed = 1; return list; });
+  console.log('hazard events', JSON.stringify(hazardEvents));
+  if (!hazardEvents.includes('tree')) errors.push('tree event missing');
   // 합성음: 오프라인으로 렌더해 무음·찢어짐이 없는지 측정
   const audio = await page.evaluate(async () => {
-    const list = [['whoosh'], ['hit', '1W'], ['hit', '5I'], ['hit', 'SW'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'fairway'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['lip'], ['rock'], ['coin'], ['fanfare']];
+    const list = [['whoosh'], ['hit', '1W'], ['hit', '5I'], ['hit', 'SW'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'fairway'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['lip'], ['rock'], ['leaves', true], ['trunk'], ['coin'], ['fanfare']];
     const out = {};
     for (const [name, arg] of list) {
       const ctx = new OfflineAudioContext(1, 44100 * 1.8, 44100);

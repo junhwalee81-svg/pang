@@ -97,6 +97,7 @@ function drawDecor(c, layer) {
     const h = d.h * cam.z, w = (h * im.width) / im.height;
     const base = sy(heightAt(hole, d.x));
     const y = layer === 'back' ? base - band.far + 5 : base + band.near * 0.72;
+    x.globalAlpha = layer === 'back' ? 0.74 : 1;
     if (layer === 'back') {
       x.fillStyle = 'rgba(16,48,28,.2)';
       x.beginPath();
@@ -105,6 +106,7 @@ function drawDecor(c, layer) {
     }
     x.drawImage(im, px - w / 2, y - h, w, h);
   }
+  x.globalAlpha = 1;
 }
 
 function bandPx(z) { return { far: clamp(z * 0.72, 7, 26), near: clamp(z * 0.5, 7, 18) }; }
@@ -391,9 +393,28 @@ function drawCupAndFlag(c) {
 
 /** 공이 실제로 부딪히는 장애물 */
 function drawHazards(c) {
-  const { x, cam, hole, sx, sy } = c;
+  const { x, G, cam, hole, sx, sy } = c;
   if (!hole.layout) return;
   const margin = 240;
+  for (const t of hole.layout.trees) {
+    const px = sx(t.x);
+    const im = ART.scene[t.kind];
+    const h = t.h * cam.z;
+    const w = (h * im.width) / im.height;
+    if (px < -w || px > c.W + w) continue;
+    const y = sy(heightAt(hole, t.x)) + 3;
+    x.fillStyle = 'rgba(14,44,24,.32)';
+    x.beginPath();
+    x.ellipse(px, y - 1, w * 0.52, Math.max(3, h * 0.04), 0, 0, Math.PI * 2);
+    x.fill();
+    const shaking = G.treeShake && G.treeShake.x === t.x;
+    const sway = shaking ? Math.sin(G.time * 34) * 0.05 * (G.treeShake.t / G.treeShake.max) : 0;
+    x.save();
+    x.translate(px, y);
+    x.rotate(sway);
+    x.drawImage(im, -w / 2, -h, w, h);
+    x.restore();
+  }
   for (const rock of hole.layout.rocks) {
     const px = sx(rock.x);
     if (px < -margin || px > c.W + margin) continue;
@@ -597,6 +618,16 @@ function drawMinimap(c) {
     x.fillRect(px(G.markerX) - 1, my + 3, 2, mh - 6);
   }
   if (hole.layout) {
+    x.fillStyle = '#1d6b3e';
+    for (const t of hole.layout.trees) {
+      const tx = px(t.x), ty = py(heightAt(hole, t.x));
+      x.beginPath();
+      x.moveTo(tx, ty - 11);
+      x.lineTo(tx + 4.5, ty);
+      x.lineTo(tx - 4.5, ty);
+      x.closePath();
+      x.fill();
+    }
     x.fillStyle = '#d7dde4';
     for (const rock of hole.layout.rocks) {
       x.beginPath();

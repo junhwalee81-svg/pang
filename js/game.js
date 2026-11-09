@@ -25,7 +25,7 @@ var GAME = {
 var SCORE_NAMES = { '-3': '알바트로스', '-2': '이글', '-1': '버디', 0: '파', 1: '보기', 2: '더블 보기', 3: '트리플 보기' };
 
 var G = {
-  phase: 'title', time: 0, flash: 0, shake: 0, pop: null,
+  phase: 'title', time: 0, flash: 0, shake: 0, pop: null, treeShake: null,
   view: { W: 380, H: 800, cy: 400, miniY: 58, playTop: 100, playH: 520 },
   cam: { x: 0, y: 8, z: 26 },
   hole: null, holeIndex: 0, scores: [], strokes: 0, wind: 0,
@@ -300,6 +300,7 @@ function updateGame(dt) {
   G.flash = Math.max(0, G.flash - dt * 2.6);
   G.shake = Math.max(0, G.shake - dt * 22);
   if (G.pop) { G.pop.t -= dt; if (G.pop.t <= 0) G.pop = null; }
+  if (G.treeShake) { G.treeShake.t -= dt; if (G.treeShake.t <= 0) G.treeShake = null; }
   updateFx(dt);
   if (!G.hole) {
     G.cam.z = 15;
@@ -405,6 +406,19 @@ function handleBallEvent(ev) {
     spawn('ring', ev.x, y + 0.1, 2, { color: '#ffffff', size: 40, speed: 0, life: 0.7, grow: 3, add: true });
   } else if (ev.kind === 'cup') {
     SFX.play('cup');
+  } else if (ev.kind === 'tree') {
+    const hit = ev.surface === 'hit';
+    SFX.play('leaves', hit);
+    G.treeShake = { x: ev.treeX, t: hit ? 0.6 : 0.3, max: 0.6 };
+    const leaf = THEMES[G.hole.theme].trees[0].includes('Orange') ? '#f2a03d' : '#5fcf72';
+    spawn('smoke', ev.x, ev.y, hit ? 16 : 6, { color: leaf, size: 14, speed: 6, life: 1.1, up: 1, grav: 5 });
+    if (hit && !G.pop) G.pop = { text: '부스럭!', t: 0.6, max: 0.6, fill: '#c9ffb0', stroke: 'rgba(20,70,40,.92)' };
+  } else if (ev.kind === 'trunk') {
+    SFX.play('trunk');
+    G.treeShake = { x: ev.treeX, t: 0.4, max: 0.6 };
+    G.shake = Math.max(G.shake, 5);
+    spawn('smoke', ev.x, ev.y + 0.3, 6, { color: '#b98a5a', size: 16, speed: 4, life: 0.5, up: 2 });
+    if (!G.pop) G.pop = { text: '쿵!', t: 0.6, max: 0.6, fill: '#ffe2b0', stroke: 'rgba(70,40,20,.92)' };
   } else if (ev.kind === 'rock') {
     SFX.play('rock');
     spawn('spark', ev.x, ev.y + 0.3, 10, { color: '#fff1c2', size: 16, speed: 9, life: 0.4, up: 3, add: true });
