@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>팡팡 골프</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hide">
+  <div class="pill hole"><b id="holeNo">H1</b><span id="holePar">PAR 4</span><em id="holeName"></em></div>
+  <div class="pill stroke"><small>타수</small><b id="strokes">0타</b></div>
+  <div class="pill wind" id="windBox"><i id="windArrow">➤</i><b id="windV">0</b><small>m/s</small><em id="windType"></em></div>
+  <div class="pill pin"><small>핀까지</small><b id="pin">0m</b></div>
+  <button class="pill coin" id="shopBtn">🪙 <b id="coins">0</b></button>
+</div>
+
+<div id="panel" class="hide">
+  <div class="rowClubs" id="clubs"></div>
+  <div class="rowTune">
+    <div class="tune"><label>발사각</label><button id="angleDown" aria-label="각도 낮추기">−</button><b id="angleV">0°</b><button id="angleUp" aria-label="각도 높이기">＋</button></div>
+    <div class="tune spin"><label>스핀</label><button id="spinTop" aria-label="톱스핀">톱</button><span class="spinBall"><i id="spinDot"></i></span><b id="spinV">없음</b><button id="spinBack" aria-label="백스핀">백</button></div>
+  </div>
+  <div class="rowShot">
+    <div id="gauge"><div id="gFill"></div><div id="gZone"></div><div id="gMark"></div><span id="gPct">0%</span></div>
+    <button id="shot">샷 시작</button>
+  </div>
+</div>
+
+<section id="title">
+  <div class="logo"><span>팡팡</span><strong>골프</strong></div>
+  <p class="tag">세 번의 터치로 완성하는 한 방</p>
+  <div id="lineup"></div>
+  <div class="titleBtns">
+    <button class="primary big" id="playBtn">라운드 시작</button>
+    <button class="ghost" id="titleShop">상점</button>
+    <button class="ghost" id="creditBtn">크레딧</button>
+  </div>
+</section>
+
+<div id="modal"><div id="modalBody" class="sheet"></div></div>
+<div id="loading">불러오는 중…</div>
+
+<script src="js/assets.js"></script>
+<script src="js/data.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/render.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
