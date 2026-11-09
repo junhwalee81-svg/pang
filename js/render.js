@@ -359,9 +359,10 @@ function drawMarkers(c) {
   x.textAlign = 'center';
   x.lineWidth = 3.5;
   x.strokeStyle = 'rgba(20,40,70,.8)';
-  x.strokeText('MAX', px, py - 22);
+  const label = currentPassive().kind === 'windMarker' ? 'MAX·바람' : 'MAX';
+  x.strokeText(label, px, py - 22);
   x.fillStyle = '#fff6c0';
-  x.fillText('MAX', px, py - 22);
+  x.fillText(label, px, py - 22);
 }
 
 function drawGolferLayer(c) {

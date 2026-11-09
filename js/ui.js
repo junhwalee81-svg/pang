@@ -257,6 +257,12 @@ function renderShop() {
     info.innerHTML = '<b></b><small></small>';
     info.querySelector('b').textContent = item.name;
     info.querySelector('small').textContent = statLine(item.stats);
+    if (item.passive) {
+      const tag = document.createElement('span');
+      tag.className = 'passive';
+      tag.textContent = item.passive.text;
+      info.appendChild(tag);
+    }
     card.appendChild(info);
     const btn = document.createElement('button');
     btn.textContent = worn ? '장착 중' : owned ? '장착' : '🪙 ' + item.price;

@@ -119,8 +119,20 @@ function lieMul(x, club) {
   return club === 'SW' && type === 'bunker' ? TERRAIN_LIE.bunkerWedge : t;
 }
 
+function currentPassive() { return ITEMS.char.find((c) => c.id === G.equip.char).passive; }
+
+function passiveOptions() {
+  const p = currentPassive();
+  return {
+    windMul: p.kind === 'windMul' ? p.value : 1,
+    puttErrMul: p.kind === 'puttErrMul' ? p.value : 1,
+    driverDist: p.kind === 'driverDist' ? p.value : 1,
+    backMul: p.kind === 'backMul' ? p.value : 1,
+  };
+}
+
 function shotOptions(extra) {
-  return Object.assign({
+  return Object.assign(passiveOptions(), {
     club: G.club, power: 1, angle: G.angle, spin: G.spin, stats: G.stats, impact: 0,
     hole: G.hole, x: G.ball.x, wind: 0, lie: lieMul(G.ball.x, G.club), special: G.club === 'PT' ? null : G.special,
   }, extra || {});
@@ -129,7 +141,7 @@ function shotOptions(extra) {
 function recomputeMarker() {
   if (!G.hole || !G.ball) return;
   if (G.club === 'PT') { G.markerX = null; return; }
-  const r = simulateShot(shotOptions());
+  const r = simulateShot(shotOptions({ wind: currentPassive().kind === 'windMarker' ? G.wind : 0 }));
   G.markerX = G.ball.x + r.carry;
 }
 
@@ -265,7 +277,8 @@ function launchNow() {
 function onPerfect(special) {
   const unlockedBefore = specialUnlocked();
   G.perfects++;
-  G.coins += GAME.coinsPerfect;
+  const pas = currentPassive();
+  G.coins += GAME.coinsPerfect * (pas.kind === 'perfectCoinMul' ? pas.value : 1);
   G.golfer.expr = 'head';
   G.flash = 0.62;
   G.shake = 9;

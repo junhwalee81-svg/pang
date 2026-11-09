@@ -90,6 +90,35 @@ async function run(width, height, name) {
   console.log('special', JSON.stringify(special));
   if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
   await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
+  // 패시브: 캐릭터별 효과가 실제 수치에 반영되는지
+  const passive = await page.evaluate(() => {
+    placeBall(G.hole.cup - 150);
+    const out = {};
+    const wear = (id) => { G.equip.char = id; G.stats = Object.assign({}, BASE_STATS); recomputeMarker(); };
+    G.wind = 6;
+    wear('kai'); G.club = '1W';
+    const kai = launchFrom(shotOptions()).v;
+    out.kaiCarry = simulateShot(shotOptions({ hole: undefined, x: 0, lie: 1 })).carry;
+    wear('leo'); G.club = '1W';
+    out.baseCarry = simulateShot(shotOptions({ hole: undefined, x: 0, lie: 1 })).carry;
+    out.leoWind = shotEnv(shotOptions({ wind: 6 })).windMul;
+    out.driverFaster = kai > launchFrom(shotOptions()).v;
+    wear('mina'); G.club = 'PT';
+    out.minaPutt = Math.abs(launchFrom(shotOptions({ power: 0.5, impact: 0.12 })).v - launchFrom(shotOptions({ power: 0.5, impact: 0.022 })).v);
+    wear('leo'); G.club = 'PT';
+    out.leoPutt = Math.abs(launchFrom(shotOptions({ power: 0.5, impact: 0.12 })).v - launchFrom(shotOptions({ power: 0.5, impact: 0.022 })).v);
+    wear('sora'); G.club = 'SW';
+    out.soraBack = shotEnv(shotOptions()).backMul;
+    wear('gbot'); G.club = '1W'; recomputeMarker(); const windy = G.markerX;
+    wear('leo'); G.club = '1W'; recomputeMarker(); out.markerDiff = windy - G.markerX;
+    wear('zombie'); const c0 = G.coins; onPerfect(); out.zombieCoins = G.coins - c0;
+    wear('leo'); const c1 = G.coins; onPerfect(); out.leoCoins = G.coins - c1;
+    G.perfects = 0; G.pop = null; G.flash = 0; G.wind = 0; recomputeMarker();
+    return out;
+  });
+  console.log('passive', JSON.stringify(passive));
+  const ratio = passive.kaiCarry / passive.baseCarry;
+  if (passive.leoWind !== 0.9 || !(ratio > 1.04 && ratio < 1.06) || !(passive.minaPutt < passive.leoPutt) || passive.soraBack !== 1.3 || Math.abs(passive.markerDiff) < 1 || passive.zombieCoins !== passive.leoCoins * 2) errors.push('passive check failed');
   await page.evaluate(() => openShop());
   await page.waitForTimeout(150);
   await page.screenshot({ path: path.join(OUT, name + '_11shop.png') });

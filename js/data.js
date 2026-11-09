@@ -27,12 +27,12 @@ var SLOT_NAMES = { char: '캐릭터', club: '클럽', hat: '모자', top: '상�
 
 var ITEMS = {
   char: [
-    { id: 'leo', name: '레오', price: 0, stats: { power: 10, control: 10, impact: 10, spin: 10 } },
-    { id: 'mina', name: '미나', price: 300, stats: { power: 8, control: 13, impact: 11, spin: 10 } },
-    { id: 'kai', name: '카이', price: 500, stats: { power: 14, control: 8, impact: 10, spin: 8 } },
-    { id: 'sora', name: '소라', price: 500, stats: { power: 9, control: 11, impact: 9, spin: 15 } },
-    { id: 'zombie', name: '좀비 버디', price: 800, stats: { power: 12, control: 7, impact: 14, spin: 9 } },
-    { id: 'gbot', name: 'G-BOT', price: 1200, stats: { power: 11, control: 14, impact: 12, spin: 11 } },
+    { id: 'leo', name: '레오', price: 0, stats: { power: 10, control: 10, impact: 10, spin: 10 }, passive: { kind: 'windMul', value: 0.9, text: '바람 영향 -10%' } },
+    { id: 'mina', name: '미나', price: 300, stats: { power: 8, control: 13, impact: 11, spin: 10 }, passive: { kind: 'puttErrMul', value: 0.8, text: '퍼팅 오차 -20%' } },
+    { id: 'kai', name: '카이', price: 500, stats: { power: 14, control: 8, impact: 10, spin: 8 }, passive: { kind: 'driverDist', value: 1.05, text: '드라이버 비거리 +5%' } },
+    { id: 'sora', name: '소라', price: 500, stats: { power: 9, control: 11, impact: 9, spin: 15 }, passive: { kind: 'backMul', value: 1.3, text: '백스핀 효과 +30%' } },
+    { id: 'zombie', name: '좀비 버디', price: 800, stats: { power: 12, control: 7, impact: 14, spin: 9 }, passive: { kind: 'perfectCoinMul', value: 2, text: '팡 성공 시 코인 2배' } },
+    { id: 'gbot', name: 'G-BOT', price: 1200, stats: { power: 11, control: 14, impact: 12, spin: 11 }, passive: { kind: 'windMarker', value: true, text: '최대비거리 마커에 바람 반영' } },
   ],
   club: [
     { id: 'club_basic', name: '연습용 세트', price: 0, color: '#9aa7b4', stats: {} },

@@ -28,6 +28,7 @@ var PHYS = {
   errAngle: 26,           // 오차 → 각도 오차(도)
   errSpin: 1.2,           // 오차 → 스핀 손실
   puttErr: 0.55,          // 오차 → 퍼팅 속도 오차
+  distToSpeed: 0.76,      // 비거리 배율 → 속도 배율 지수
 };
 
 // rest: 반발, tang: 튈 때 수평 유지율, mu: 구름 저항, grip: 백스핀 적용 비율, hold: 정지 경사 한계
@@ -170,11 +171,12 @@ function launchFrom(o) {
   const miss = perfect ? 0 : (abs - f.perfectHalf) / f.controlDiv;
   if (o.club === 'PT') {
     const v = c.v0 * Math.sqrt(clamp(o.power, 0, 1));
-    return { v: v * (1 + Math.sign(err) * miss * PHYS.puttErr), ang: 0, spin: 0, perfect, miss, putt: true };
+    return { v: v * (1 + Math.sign(err) * miss * PHYS.puttErr * (o.puttErrMul || 1)), ang: 0, spin: 0, perfect, miss, putt: true };
   }
   const sp = SPECIAL_SHOTS[o.special] || null;
   let v = c.v0 * Math.pow(clamp(o.power, 0.02, 1), PHYS.powerExp) * f.powerMul * (sp ? sp.speedMul : 1);
   if (perfect) v *= PHYS.perfectBoost;
+  if (o.club === '1W' && o.driverDist) v *= Math.pow(o.driverDist, PHYS.distToSpeed);
   v *= (o.lie || 1) * (1 - clamp(miss * PHYS.errSpeed, 0, 0.6));
   const ang = c.loft + (o.angle || 0) + (sp ? sp.loftAdd : 0) + Math.sign(err) * miss * PHYS.errAngle;
   const spin = (c.spin + (sp ? sp.spinAdd : 0) + (o.spin || 0) * c.spinCtl * f.spinMul) * (1 - clamp(miss * PHYS.errSpin, 0, 0.8));
@@ -368,7 +370,7 @@ function simulateShot(o) {
 /** 샷 옵션 → 공 진행 환경 */
 function shotEnv(o) {
   const sp = SPECIAL_SHOTS[o.special] || null;
-  return { wind: o.wind || 0, windMul: o.windMul == null ? 1 : o.windMul, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
+  return { wind: o.wind || 0, windMul: o.windMul == null ? 1 : o.windMul, backMul: o.backMul || 1, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
 }
 
 if (typeof module !== 'undefined') {
