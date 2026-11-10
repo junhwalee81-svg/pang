@@ -75,7 +75,8 @@ async function run(width, height, name) {
   const club = await page.evaluate(() => G.club);
   const putt = await findPutt(page);
   if (!putt) errors.push('putt not found');
-  await shoot(page, putt.power, 0, putt.yaw);
+  const puttOnce = await page.evaluate(([p, y]) => { setYaw(y - G.yaw); pressShot(); G.gauge.pos = p; pressShot(); return G.phase; }, [putt.power, putt.yaw]);
+  if (puttOnce !== 'swing') errors.push('putt single press failed ' + puttOnce);
   await until(page, ['holed', 'stopped', 'score']);
   const holed = await page.evaluate(() => ({ phase: G.phase, holed: G.ball.holed, strokes: G.strokes }));
   await step(page, 0.8);
@@ -101,6 +102,33 @@ async function run(width, height, name) {
   });
   console.log('special', JSON.stringify(special));
   if (!(special.hiApex > special.loApex) || !(special.loRun > special.hiRun) || special.aimReject || special.gest.join() !== 'up,down,cw,ccw,dot') errors.push('special check failed');
+
+  // 게이지는 천천히 오르고 꼭대기에서 잠깐 머문다
+  const gaugeT = await page.evaluate(() => {
+    pressShot(); let n = 0;
+    while (G.gauge.dir > 0 && n < 1000) { updateGame(1 / 60); n++; }
+    const rise = n / 60; let hold = 0;
+    while (G.gauge.hold > 0 && hold < 200) { updateGame(1 / 60); hold++; }
+    cancelShot(); G.pop = null;
+    return { rise, hold: hold / 60 };
+  });
+  console.log('gauge', JSON.stringify(gaugeT));
+  if (!(gaugeT.rise > 1.8 && gaugeT.hold > 0.25)) errors.push('gauge speed check failed');
+
+  // 그린 보기: 조준 중에만, 카메라가 컵 쪽으로 간다
+  const gv = await page.evaluate(() => {
+    const c = cupPos();
+    const d0 = Math.hypot(G.cam.lx - c.x, G.cam.lz - c.z);
+    toggleGreenView(true); updateCamera(5);
+    const d1 = Math.hypot(G.cam.lx - c.x, G.cam.lz - c.z);
+    renderGame(G); syncHud();
+    const btn = document.getElementById('greenBtn').textContent;
+    return { d0, d1, btn };
+  });
+  await snap('9green');
+  const gvOff = await page.evaluate(() => { pressShot(); const v = G.viewGreen; cancelShot(); G.pop = null; updateCamera(5); return v; });
+  console.log('greenView', JSON.stringify(gv), gvOff);
+  if (!(gv.d1 < 1 && gv.d0 > 50) || gvOff || gv.btn !== '⛳ 공으로') errors.push('green view check failed');
 
   // 임팩트를 놓치면 타수 없이 다시
   const cancel = await page.evaluate(() => {
@@ -134,7 +162,9 @@ async function run(width, height, name) {
   // 화면 제스처: 위로 긋기와 점 세 번
   const box = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }));
   const cx = box.w * 0.5, cy = box.h * 0.32;
-  await page.evaluate(() => { if (G.phase !== 'aim') readyNextShot(); pressShot(); });
+  // 앞 샷 결과(타수 초과 창 등)에 흔들리지 않게 깨끗한 조준 상태에서 시작한다
+  const gPhase = await page.evaluate(() => { for (let i = 0; i < 4 && G.phase !== 'aim'; i++) readyNextShot(); closeModal(); G.strokes = 0; placeBall(G.hole.cup - 150); G.pop = null; window.__step(0.02); pressShot(); return G.phase; });
+  if (gPhase !== 'power') errors.push('gesture setup ' + gPhase);
   await page.mouse.move(cx, cy + 90);
   await page.mouse.down();
   for (let i = 1; i <= 10; i++) await page.mouse.move(cx + i * 0.4, cy + 90 - i * 18);
@@ -221,9 +251,9 @@ async function run(width, height, name) {
     wear('leo'); G.club = '1W';
     out.base = simulateShot(shotOptions(flat)).carry;
     out.leoWind = shotEnv(shotOptions({ wind: 6 })).windMul;
-    const puttGap = () => Math.abs(launchFrom(shotOptions({ power: 0.5, impact: 0.12 })).v - launchFrom(shotOptions({ power: 0.5, impact: 0.022 })).v);
-    wear('mina'); G.club = 'PT'; out.minaPutt = puttGap();
-    wear('leo'); G.club = 'PT'; out.leoPutt = puttGap();
+    const puttGap = () => { const ph = G.phase, cl = G.club; G.phase = 'power'; G.club = 'PT'; G.gauge.pos = 0; G.gauge.dir = 1; G.gauge.hold = 0; let n = 0; while (G.gauge.pos < 1 && n < 2000) { updateGame(1 / 60); n++; } G.phase = ph; G.club = cl; G.gauge.pos = 0; return n; };
+    wear('mina'); out.minaPutt = -puttGap();
+    wear('leo'); out.leoPutt = -puttGap();
     wear('sora'); G.club = 'SW'; out.soraBack = shotEnv(shotOptions()).backMul;
     wear('gbot'); G.club = '1W'; recomputeMarker(); const windy = G.markerZ;
     wear('leo'); G.club = '1W'; recomputeMarker(); out.markerDiff = windy - G.markerZ;

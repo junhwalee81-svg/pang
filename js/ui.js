@@ -36,6 +36,7 @@ function resize() {
   mini.height = mh * 2;
   mini.style.top = top + 6 + 'px';
   $('slopeBox').style.top = top + 8 + 'px';
+  $('greenBtn').style.top = top + 6 + 'px';
   UI.miniW = mw;
   UI.miniH = mh;
   const ink = $('ink');
@@ -213,6 +214,8 @@ function buildControls() {
   $('shot').addEventListener('pointerdown', press);
   $('gauge').addEventListener('pointerdown', press);
   $('shopBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); openShop(); });
+  $('greenBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); toggleGreenView(); });
+  $('mini').addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); toggleGreenView(); });
 
   // 타점 공: 끌어서 맞힐 점을 정한다
   const pad = $('ballPad');
@@ -259,7 +262,7 @@ function buildControls() {
     SFX.unlock();
     if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (!e.repeat) pressShot(); return; }
     const arrow = { ArrowUp: 'U', ArrowDown: 'D', ArrowLeft: 'L', ArrowRight: 'R' }[e.code];
-    if (G.phase === 'power' && arrow) {
+    if ((G.phase === 'power' || G.phase === 'impact') && arrow) {
       e.preventDefault();
       UI.keys = ((UI.keys || '') + arrow).slice(-3);
       const hit = KEY_COMMANDS.find((c) => UI.keys.endsWith(c.keys));
@@ -267,6 +270,7 @@ function buildControls() {
       return;
     }
     if (G.phase !== 'aim') return;
+    if (e.code === 'KeyG' || e.code === 'KeyV') { toggleGreenView(); return; }
     if (e.code === 'ArrowLeft') setYaw(-1);
     else if (e.code === 'ArrowRight') setYaw(1);
     else if (e.code === 'KeyW') moveImpactPoint(0, -0.2);
@@ -277,8 +281,10 @@ function buildControls() {
   });
 }
 
+function puttReach() { return CLUB_TYPES.PT.v0 * CLUB_TYPES.PT.v0 / (2 * TERRAIN.green.mu * PHYS.g); }
+
 function clubReachText(id) {
-  if (id === 'PT') return Math.round(CLUB_TYPES.PT.v0 * CLUB_TYPES.PT.v0 / (2 * TERRAIN.green.mu * PHYS.g)) + 'm';
+  if (id === 'PT') return Math.round(puttReach()) + 'm';
   UI.reach = UI.reach || {};
   const key = id + JSON.stringify(G.stats);
   if (UI.reach[key] == null) UI.reach[key] = Math.round(simulateShot({ club: id, stats: G.stats, impact: PHYS.impactBase + 1e-6 }).carry);
@@ -287,7 +293,7 @@ function clubReachText(id) {
 
 function shotLabel() {
   if (G.phase === 'aim') return '샷';
-  if (G.phase === 'power') return '파워';
+  if (G.phase === 'power') return G.club === 'PT' ? '퍼팅' : '파워';
   if (G.phase === 'impact') return '임팩트';
   if (G.phase === 'intro') return '건너뛰기';
   return '···';
@@ -338,7 +344,13 @@ function syncHud() {
   setText($('shot'), shotLabel());
   $('shot').dataset.step = G.phase;
   $('gauge').dataset.step = G.phase;
-  const zoneHalf = statFactors(G.stats).perfectHalf;
+  const putt = G.club === 'PT';
+  $('gauge').classList.toggle('putt', putt);
+  const gb = $('greenBtn');
+  gb.classList.toggle('hide', G.phase !== 'aim');
+  gb.classList.toggle('on', G.viewGreen);
+  setText(gb, G.viewGreen ? '⛳ 공으로' : '⛳ 그린 보기');
+  const zoneHalf = putt ? 0 : statFactors(G.stats).perfectHalf;
   const scale = 100 / (1 - GAME.impactFloor);
   $('gZone').style.left = gaugePercent(-zoneHalf) + '%';
   $('gZone').style.width = zoneHalf * 2 * scale + '%';
@@ -348,7 +360,10 @@ function syncHud() {
   $('gFill').style.width = fillTo * scale + '%';
   $('gMark').style.left = gaugePercent(G.phase === 'aim' ? 0 : G.gauge.pos) + '%';
   $('gMark').classList.toggle('hot', G.phase === 'impact');
-  setText($('gPct'), G.command && G.phase !== 'aim' ? SPECIAL_SHOTS[G.command.id].icon + ' ' + SPECIAL_SHOTS[G.command.id].name : Math.round((G.phase === 'power' ? G.gauge.pos : showPower ? G.gauge.power : 0) * 100) + '%');
+  const shown = G.phase === 'power' ? G.gauge.pos : showPower ? G.gauge.power : 0;
+  // 퍼팅은 평지에서 굴러갈 거리(게이지에 비례)로 보여 준다
+  const gText = putt ? (shown * puttReach()).toFixed(1) + 'm / ' + puttReach().toFixed(0) + 'm' : Math.round(shown * 100) + '%';
+  setText($('gPct'), G.command && G.phase !== 'aim' ? SPECIAL_SHOTS[G.command.id].icon + ' ' + SPECIAL_SHOTS[G.command.id].name : gText);
   const mini = $('mini');
   const x = mini.getContext('2d');
   x.setTransform(2, 0, 0, 2, 0, 0);

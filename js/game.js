@@ -1,8 +1,10 @@
 /* 게임 진행과 상태. 화면은 render.js, 버튼은 ui.js가 맡는다. */
 
 var GAME = {
-  gaugeSpeed: 0.82,     // 파워 게이지 속도(초당 비율)
-  impactSpeed: 1.2,     // 임팩트 복귀 속도
+  gaugeSpeed: 0.5,      // 파워 게이지 속도(초당 비율). 오르는 동안 커맨드를 넣는다
+  gaugeTopHold: 0.35,   // 게이지가 꼭대기에서 머무는 시간(초)
+  puttGaugeSpeed: 0.42, // 퍼팅 게이지 속도
+  impactSpeed: 0.8,     // 임팩트 복귀 속도
   impactFloor: -0.15,   // 임팩트 마커가 사라지는 지점
   backswing: 135,       // 백스윙 각도(도)
   puttBackswing: 22,
@@ -35,7 +37,7 @@ var G = {
   ball: null, lastX: 0, lastZ: 0, trail: [], trailFade: 1, fx: [],
   golfer: { x: 0, z: 0, yaw: 0, phi: 0, pose: null },
   club: '1W', swingClub: null, angle: 0, spin: 0, yaw: 0, special: null, curve: 0, impactPt: { x: 0, y: 0 }, command: null, markerX: null, markerZ: null, preview: [],
-  gauge: { pos: 0, dir: 1, power: 0 },
+  gauge: { pos: 0, dir: 1, power: 0, hold: 0 }, viewGreen: false,
   shot: null, shotStyle: null, stopT: 0, swingT: 0, launched: false, phiTop: 0, followT: null,
   perfects: 0, introT: 0, holedT: 0, resultShown: false, accum: 0,
   coins: 0, owned: {}, equip: Object.assign({}, DEFAULT_EQUIP), best: null, stats: null, test: false,
@@ -166,7 +168,6 @@ function passiveOptions() {
   const p = currentPassive();
   return {
     windMul: p.kind === 'windMul' ? p.value : 1,
-    puttErrMul: p.kind === 'puttErrMul' ? p.value : 1,
     driverDist: p.kind === 'driverDist' ? p.value : 1,
     backMul: p.kind === 'backMul' ? p.value : 1,
   };
@@ -230,7 +231,7 @@ function resetImpactPoint() {
 
 /** 게이지가 오르는 동안 들어온 특수샷 커맨드. dir: 회오리가 휘는 방향(+1 오른쪽) */
 function inputCommand(id, dir) {
-  if (G.phase !== 'power' || G.club === 'PT' || !SPECIAL_SHOTS[id]) return false;
+  if ((G.phase !== 'power' && G.phase !== 'impact') || G.club === 'PT' || !SPECIAL_SHOTS[id]) return false;
   G.command = { id, dir: dir || 1 };
   SFX.play('lock');
   return true;
@@ -248,8 +249,16 @@ function cancelShot() {
   SFX.play('ui');
 }
 
+/** 샷 전에 그린 쪽을 내려다본다(다시 누르면 공으로) */
+function toggleGreenView(on) {
+  if (G.phase !== 'aim') return;
+  G.viewGreen = on === undefined ? !G.viewGreen : !!on;
+  SFX.play('ui');
+}
+
 function readyShot() {
   G.phase = 'aim';
+  G.viewGreen = false;
   resetImpactPoint();
   G.special = null;
   G.command = null;
@@ -320,12 +329,16 @@ function pressShot() {
   if (G.phase === 'intro') { readyShot(); updateCamera(5); return; }
   if (G.phase === 'aim') {
     G.phase = 'power';
+    G.viewGreen = false;
     G.gauge.pos = 0;
     G.gauge.dir = 1;
+    G.gauge.hold = 0;
     G.command = null;
     SFX.play('gauge');
   } else if (G.phase === 'power') {
     G.gauge.power = Math.max(0.02, G.gauge.pos);
+    // 퍼팅은 게이지 한 번으로 끝난다(임팩트 판정 없음)
+    if (G.club === 'PT') { hitBall(0); return; }
     G.phase = 'impact';
     SFX.play('lock');
   } else if (G.phase === 'impact') {
@@ -363,7 +376,8 @@ function launchNow() {
   G.trailFade = 1;
   G.launched = true;
   G.accum = 0;
-  if (lp.perfect) onPerfect(o.special);
+  if (lp.putt) { G.shotStyle = null; SFX.play('hit', G.swingClub); }
+  else if (lp.perfect) onPerfect(o.special);
   else {
     if (cmd) G.pop = { text: '커맨드 실패', sub: '임팩트가 판정 폭을 벗어났어요', t: 1, max: 1, fill: '#ffb3a8' };
     SFX.play('hit', G.swingClub);
@@ -401,8 +415,11 @@ function updateGame(dt) {
     if (G.introT <= 0) { readyShot(); updateCamera(5); }
   } else if (p === 'power') {
     const g = G.gauge;
-    g.pos += g.dir * GAME.gaugeSpeed * dt;
-    if (g.pos >= 1) { g.pos = 1; g.dir = -1; }
+    const putt = G.club === 'PT';
+    const speed = putt ? GAME.puttGaugeSpeed * (currentPassive().kind === 'puttGaugeMul' ? currentPassive().value : 1) : GAME.gaugeSpeed;
+    if (g.hold > 0) g.hold -= dt;
+    else g.pos += g.dir * speed * dt;
+    if (g.pos >= 1 && g.dir > 0) { g.pos = 1; g.dir = -1; g.hold = GAME.gaugeTopHold; }
     if (g.pos <= 0 && g.dir < 0) { cancelShot(); return; }
     G.golfer.phi = -g.pos * (G.club === 'PT' ? GAME.puttBackswing : GAME.backswing);
   } else if (p === 'impact') {
@@ -632,6 +649,18 @@ function updateCamera(dt) {
     lx = fx + 80; lz = centerZ(hole, Math.min(fx + 80, cup.x));
     ly = heightAt(hole, lx, lz) + 2;
     rate = 8;
+  } else if (p === 'aim' && G.viewGreen) {
+    // 그린 보기: 공 쪽 앞 하늘에서 컵을 내려다보며 그린 전체를 담는다
+    const S = holeShapes(hole), cup = cupPos();
+    const gy2 = heightAt(hole, cup.x, cup.z);
+    const dx = cup.x - b.x, dz = cup.z - b.z, d = Math.hypot(dx, dz) || 1;
+    const r = Math.max(S.green.rx, S.green.rz);
+    const narrow = G.view.W < G.view.H;
+    const back = clamp(d, 8, 30) * 0.6 + r * (narrow ? 1.25 : 0.8);
+    px = cup.x - (dx / d) * back; pz = cup.z - (dz / d) * back;
+    py = gy2 + r * (narrow ? 1.5 : 1.0) + 10;
+    lx = cup.x; lz = cup.z; ly = gy2;
+    rate = 5;
   } else if (p === 'aim' || p === 'power' || p === 'impact' || p === 'swing') {
     if (G.club === 'PT') {
       const d = Math.min(distToCup(), 28);
