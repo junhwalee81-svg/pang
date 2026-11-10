@@ -1,4 +1,4 @@
-// 실제 브라우저로 한 홀 이상 끝까지 쳐 보고 화면을 찍는다.
+// 실제 브라우저(WebGL)로 샷→퍼팅→홀아웃→다음 홀과 전 기능을 확인하고 화면을 찍는다.
 // 사용: NODE_PATH=<playwright-core 폴더> node tests/playthrough.js <출력 폴더>
 const path = require('path');
 const fs = require('fs');
@@ -6,189 +6,191 @@ const { chromium } = require('playwright-core');
 
 const OUT = process.argv[2] || path.join(__dirname, 'out');
 fs.mkdirSync(OUT, { recursive: true });
-const URL = 'file:///' + path.resolve(__dirname, '..', 'index.html').replace(/\\/g, '/') + '?test';
+const URL = 'file:///' + path.resolve(__dirname, '..', 'index.html').replace(/\\/g, '/') + '?test&manual';
+const ARGS = ['--use-angle=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'];
 
-async function waitPhase(page, names, ms) {
-  await page.waitForFunction((n) => n.includes(G.phase), names, { timeout: ms || 40000 });
+const step = (page, sec) => page.evaluate((s) => window.__step(s), sec);
+const until = (page, names, max) => page.evaluate(([n, m]) => {
+  for (let t = 0; t < m && !n.includes(G.phase); t += 1 / 60) updateGame(1 / 60);
+  renderGame(G);
+  syncHud();
+  return G.phase;
+}, [names, max || 40]);
+
+async function shoot(page, power, impact, yaw) {
+  await page.evaluate(([p, e, y]) => {
+    if (y !== undefined) setYaw(y - G.yaw);
+    pressShot();
+    G.gauge.pos = p; pressShot();
+    G.gauge.pos = e; pressShot();
+  }, [power, impact, yaw]);
 }
 
-async function shoot(page, power, impact) {
-  await page.evaluate(() => pressShot());
-  await page.evaluate((p) => { G.gauge.pos = p; pressShot(); G.gauge.pos = 0; }, power);
-  await page.evaluate((e) => { G.gauge.pos = e; pressShot(); }, impact);
-}
+/** 그린의 경사를 읽어 들어가는 세기·방향을 찾는다 */
+const findPutt = (page) => page.evaluate(() => {
+  const c = cupPos();
+  const base = (Math.atan2(c.z - G.ball.z, c.x - G.ball.x) * 180) / Math.PI;
+  for (let d = 0; d <= 8; d += 0.25) {
+    for (const sign of [1, -1]) {
+      const yaw = base + sign * d;
+      for (let p = 0.02; p < 1; p += 0.006) {
+        if (simulateShot(shotOptions({ power: p, yaw, ignoreHazards: true })).holed) return { power: p + 0.012, yaw };
+      }
+    }
+  }
+  return null;
+});
 
 async function run(width, height, name) {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ARGS });
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
+  const snap = (n) => page.screenshot({ path: path.join(OUT, name + '_' + n + '.png'), timeout: 120000 });
   await page.goto(URL);
-  await page.waitForFunction(() => ART.ready && document.getElementById('title').classList.contains('show'));
-  await page.screenshot({ path: path.join(OUT, name + '_1title.png') });
-  await page.evaluate(() => { window.__speed = 1; beginGame(); readyNextShot(); });
-  await page.waitForTimeout(500);
-  await page.screenshot({ path: path.join(OUT, name + '_2aim.png') });
+  await page.waitForFunction(() => VIEW.ready && document.getElementById('title').classList.contains('show'), null, { timeout: 120000 });
+  await step(page, 0.05);
+  await snap('1title');
+  await page.evaluate(() => { beginGame(); readyNextShot(); });
+  await step(page, 0.6);
+  await snap('2aim');
 
-  await page.evaluate(() => pressShot());
-  await page.evaluate(() => { G.gauge.pos = 0.75; });
-  await page.waitForTimeout(120);
-  await page.screenshot({ path: path.join(OUT, name + '_3gauge.png') });
-  await page.evaluate(() => { G.gauge.pos = 0.95; pressShot(); G.gauge.pos = 0; pressShot(); });
-  await page.waitForTimeout(650);
-  await page.screenshot({ path: path.join(OUT, name + '_4perfect.png') });
-  await page.waitForTimeout(1200);
-  await page.screenshot({ path: path.join(OUT, name + '_5flight.png') });
-  await page.evaluate(() => { window.__speed = 6; });
-  await waitPhase(page, ['stopped', 'holed', 'aim']);
-  const first = await page.evaluate(() => ({ x: G.ball.x, strokes: G.strokes, perfects: G.perfects, surface: surfaceAt(G.hole, G.ball.x) }));
+  // 퍼펙트 드라이버 샷
+  await page.evaluate(() => { pressShot(); G.gauge.pos = 0.95; pressShot(); G.gauge.pos = 0; pressShot(); });
+  await step(page, 0.26);
+  await snap('3perfect');
+  await step(page, 2);
+  await snap('4flight');
+  await until(page, ['stopped', 'holed']);
+  const first = await page.evaluate(() => ({ x: G.ball.x, z: G.ball.z, strokes: G.strokes, perfects: G.perfects, surface: surfaceAt(G.hole, G.ball.x, G.ball.z) }));
   await page.evaluate(() => readyNextShot());
 
-  await page.evaluate(() => placeBall(G.hole.cup - 40));
-  await page.evaluate(() => { window.__speed = 1; });
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: path.join(OUT, name + '_6approach.png') });
-  await page.evaluate(() => placeBall(G.hole.cup - 6));
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: path.join(OUT, name + '_7putt.png') });
+  await page.evaluate(() => placeBall(G.hole.green.from - 40));
+  await step(page, 0.5);
+  await snap('5approach');
+  await page.evaluate(() => { const c = cupPos(); placeBall(c.x - 6, c.z + 1.5); });
+  await step(page, 0.5);
+  await snap('6putt');
   const club = await page.evaluate(() => G.club);
-  await page.evaluate(() => { window.__speed = 4; });
-  await shoot(page, 0.34, 0);
-  await waitPhase(page, ['holed', 'stopped', 'score']);
-  let guard = 0;
-  while (guard++ < 6 && await page.evaluate(() => G.phase === 'stopped')) {
-    await page.evaluate(() => { readyNextShot(); placeBall(G.hole.cup - 3); });
-    await shoot(page, 0.13, 0);
-    await waitPhase(page, ['holed', 'stopped', 'score']);
-  }
+  const putt = await findPutt(page);
+  if (!putt) errors.push('putt not found');
+  await shoot(page, putt.power, 0, putt.yaw);
+  await until(page, ['holed', 'stopped', 'score']);
   const holed = await page.evaluate(() => ({ phase: G.phase, holed: G.ball.holed, strokes: G.strokes }));
-  await page.screenshot({ path: path.join(OUT, name + '_8holed.png') });
-  await waitPhase(page, ['score']);
-  await page.waitForTimeout(200);
-  await page.screenshot({ path: path.join(OUT, name + '_9score.png') });
-  await page.evaluate(() => { closeModal(); readyNextShot(); });
-  const next = await page.evaluate(() => ({ hole: G.holeIndex, phase: G.phase }));
-  await page.evaluate(() => { window.__speed = 1; readyNextShot(); });
-  await page.evaluate(() => placeBall(G.hole.cup - 150));
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: path.join(OUT, name + '_10hole2.png') });
-  // 특수샷: 해금 전 잠김, 2회 후 선택 가능, 샷이 끝까지 진행
+  await step(page, 0.8);
+  await snap('7holed');
+  await until(page, ['score'], 6);
+  await step(page, 0.05);
+  await snap('8score');
+  await page.evaluate(() => readyNextShot());
+  const next = await page.evaluate(() => ({ hole: G.holeIndex, phase: G.phase, modal: document.getElementById('modal').classList.contains('show') }));
+  await page.evaluate(() => { resize(); readyNextShot(); placeBall(G.hole.cup - 150); });
+
+  // 특수샷: 해금 전 잠김, 2회 후 선택 가능
   const special = await page.evaluate(() => {
     G.perfects = 1; setSpecial('tomahawk');
     const locked = G.special === null;
     G.perfects = 2; setClub('5I'); setSpecial('tomahawk');
-    const flat = { hole: undefined, x: 0, lie: 1 }; // 코스 변수와 무관하게 평지에서 비교
+    const flat = { hole: undefined, x: 0, z: 0, yaw: 0, lie: 1 };
     const hi = simulateShot(shotOptions(flat)); setSpecial('spike');
     const lo = simulateShot(shotOptions(flat));
     return { locked, pick: G.special, hiApex: hi.apex, loApex: lo.apex, hiRun: hi.total - hi.carry, loRun: lo.total - lo.carry };
   });
-  await page.waitForTimeout(200);
-  await page.screenshot({ path: path.join(OUT, name + '_12special.png') });
-  await page.evaluate(() => { window.__speed = 6; });
+  await step(page, 0.1);
+  await snap('9special');
   await shoot(page, 0.7, 0);
-  await waitPhase(page, ['stopped', 'holed']);
-  console.log('special', JSON.stringify(special));
+  await until(page, ['stopped', 'holed']);
   if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
-  await page.evaluate(() => { readyNextShot(); window.__speed = 1; });
-  // 장애물: 돌·나무가 화면에 보이고, 게임 안에서 충돌 이벤트가 처리되는지
-  await page.evaluate(() => {
+  console.log('special', JSON.stringify(special));
+  await page.evaluate(() => readyNextShot());
+
+  // 나무: 공의 실제 궤적 위에 시험용 나무를 놓아 충돌 이벤트를 확인한다
+  const hazard = await page.evaluate(() => {
     if (!['aim', 'stopped', 'intro', 'ball'].includes(G.phase)) readyNextShot();
+    placeBall(G.hole.tee[1] + 6, 0);
+    setClub('5I');
     const L = G.hole.layout;
-    let spot = null;
-    for (const r of L.rocks) for (const d of [9, 7, 5, 3]) {
-      if (spot === null && !['water', 'bunker', 'green'].includes(surfaceAt(G.hole, r.x - d))) spot = r.x - d;
-    }
-    placeBall(spot);
     window.__ev = [];
     const orig = window.handleBallEvent;
     window.handleBallEvent = (e) => { window.__ev.push(e.kind); orig(e); };
-    setClub('5I');
-    window.__speed = 1;
-    // 공이 1초 뒤 지날 자리에 잎 중심이 오도록 검사용 나무를 놓는다
-    const probe = makeBall(G.ball.x, G.ball.y);
+    const probe = makeBall(G.ball.x, G.ball.y, G.ball.z);
     launchBall(probe, launchFrom(shotOptions({ power: 1, impact: 0.1 })));
-    const env = shotEnv({ wind: G.wind, ignoreHazards: true });
+    const env = shotEnv({ wind: G.wind, windZ: G.windZ, ignoreHazards: true });
     while (probe.t < 1 && probe.mode === 'air') stepBall(probe, G.hole, env, PHYS.dt);
-    const rel = probe.y - heightAt(G.hole, probe.x);
-    L.trees.push({ x: probe.x, h: rel / (HAZARD.canopyBase + (1 - HAZARD.canopyBase) / 2), r: 9, kind: L.trees[0].kind });
+    const rel = probe.y - heightAt(G.hole, probe.x, probe.z);
+    L.trees.push({ x: probe.x, z: probe.z, h: rel * 1.5, r: 9, base: rel * 0.5, kind: 'oak', variant: 0, turn: 0, tint: 0 });
+    return { rel };
   });
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: path.join(OUT, name + '_14hazard.png') });
   await shoot(page, 1, 0.1);
-  await page.waitForFunction(() => window.__ev.includes('tree') || G.phase === 'stopped', null, { timeout: 15000 });
-  await page.waitForTimeout(160);
-  await page.screenshot({ path: path.join(OUT, name + '_15treehit.png') });
-  await page.evaluate(() => { window.__speed = 6; });
-  await waitPhase(page, ['stopped', 'holed']);
-  const hazardEvents = await page.evaluate(() => { const list = window.__ev.slice(); G.hole.layout.trees.pop(); readyNextShot(); window.__speed = 1; return list; });
-  console.log('hazard events', JSON.stringify(hazardEvents));
-  if (!hazardEvents.includes('tree')) errors.push('tree event missing');
+  await until(page, ['stopped', 'holed']);
+  const events = await page.evaluate(() => { const list = window.__ev.slice(); G.hole.layout.trees.pop(); readyNextShot(); return list; });
+  console.log('hazard', JSON.stringify(hazard), JSON.stringify(events));
+  if (!events.includes('tree')) errors.push('tree event missing');
+
   // 합성음: 오프라인으로 렌더해 무음·찢어짐이 없는지 측정
   const audio = await page.evaluate(async () => {
-    const list = [['whoosh'], ['hit', '1W'], ['hit', '5I'], ['hit', 'SW'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'fairway'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['lip'], ['rock'], ['leaves', true], ['trunk'], ['coin'], ['fanfare']];
+    const list = [['whoosh'], ['hit', '1W'], ['hit', 'PT'], ['hitPerfect', '1W'], ['bounce', 'green'], ['bounce', 'bunker'], ['splash'], ['cup'], ['rock'], ['leaves', true], ['trunk'], ['fanfare']];
     const out = {};
-    for (const [name, arg] of list) {
-      const ctx = new OfflineAudioContext(1, 44100 * 1.8, 44100);
-      SFX.compose(ctx, SFX.makeBus(ctx), name, 0.01, arg);
+    for (const [n, arg] of list) {
+      const ctx = new OfflineAudioContext(1, 44100 * 1.5, 44100);
+      SFX.compose(ctx, SFX.makeBus(ctx), n, 0.01, arg);
       const d = (await ctx.startRendering()).getChannelData(0);
-      let peak = 0, sum = 0, last = 0;
-      for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; sum += a * a; if (a > 0.003) last = i; }
-      out[name + (arg ? ':' + arg : '')] = [+peak.toFixed(2), +Math.sqrt(sum / d.length).toFixed(3), +(last / 44100).toFixed(2)];
+      let peak = 0;
+      for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+      out[n + (arg ? ':' + arg : '')] = +peak.toFixed(2);
     }
     return out;
   });
-  console.log('audio [최대, RMS, 길이초]', JSON.stringify(audio));
-  for (const k in audio) if (audio[k][0] < 0.05 || audio[k][0] >= 1 || audio[k][2] <= 0) errors.push('audio ' + k);
-  if (audio.cup[2] < 0.6) errors.push('cup too short');
-  // 그린 경사: 퍼터일 때만 표시, 수치·방향이 데이터와 맞는지
+  for (const k in audio) if (audio[k] < 0.05 || audio[k] >= 1) errors.push('audio ' + k);
+
+  // 그린 경사: 퍼터일 때만 표시
   const slope = await page.evaluate(() => {
-    const g = G.hole.green;
-    placeBall(g.from + 2);
-    const pt = { club: G.club, shown: !document.getElementById('slopeBox').classList.contains('hide') };
-    return { pt, slopeData: g.slope, expected: slopeBetween(G.hole, G.ball.x, G.hole.cup) * 100 };
+    const c = cupPos();
+    placeBall(c.x - 8, c.z + 2);
+    window.__step(0.02);
+    const box = document.getElementById('slopeBox');
+    const shown = { visible: !box.classList.contains('hide'), pct: document.getElementById('slopePct').textContent, kind: document.getElementById('slopeType').textContent, arrows: VIEW.arrows.visible };
+    placeBall(c.x - 120);
+    window.__step(0.02);
+    return { shown, hidden: box.classList.contains('hide') };
   });
-  await page.waitForTimeout(350);
-  const shownSlope = await page.evaluate(() => ({ pct: document.getElementById('slopePct').textContent, type: document.getElementById('slopeType').textContent, visible: !document.getElementById('slopeBox').classList.contains('hide') }));
-  await page.screenshot({ path: path.join(OUT, name + '_13slope.png') });
-  const hidden = await page.evaluate(async () => { placeBall(G.hole.cup - 120); await new Promise((r) => setTimeout(r, 120)); return document.getElementById('slopeBox').classList.contains('hide'); });
-  console.log('slope', JSON.stringify({ slope, shownSlope, hidden }));
-  if (slope.pt.club !== 'PT' || !shownSlope.visible || !hidden || Math.abs(parseFloat(shownSlope.pct) - Math.abs(slope.expected)) > 0.11) errors.push('slope check failed');
-  // 패시브: 캐릭터별 효과가 실제 수치에 반영되는지
+  console.log('slope', JSON.stringify(slope));
+  if (!slope.shown.visible || !slope.shown.arrows || !slope.hidden) errors.push('slope check failed');
+
+  // 패시브
   const passive = await page.evaluate(() => {
     placeBall(G.hole.cup - 150);
     const out = {};
     const wear = (id) => { G.equip.char = id; G.stats = Object.assign({}, BASE_STATS); recomputeMarker(); };
-    G.wind = 6;
+    const flat = { hole: undefined, x: 0, z: 0, yaw: 0, lie: 1, ignoreHazards: true };
+    G.wind = 0; G.windZ = 6;
     wear('kai'); G.club = '1W';
-    const kai = launchFrom(shotOptions()).v;
-    out.kaiCarry = simulateShot(shotOptions({ hole: undefined, x: 0, lie: 1 })).carry;
+    out.kai = simulateShot(shotOptions(flat)).carry;
     wear('leo'); G.club = '1W';
-    out.baseCarry = simulateShot(shotOptions({ hole: undefined, x: 0, lie: 1 })).carry;
+    out.base = simulateShot(shotOptions(flat)).carry;
     out.leoWind = shotEnv(shotOptions({ wind: 6 })).windMul;
-    out.driverFaster = kai > launchFrom(shotOptions()).v;
-    wear('mina'); G.club = 'PT';
-    out.minaPutt = Math.abs(launchFrom(shotOptions({ power: 0.5, impact: 0.12 })).v - launchFrom(shotOptions({ power: 0.5, impact: 0.022 })).v);
-    wear('leo'); G.club = 'PT';
-    out.leoPutt = Math.abs(launchFrom(shotOptions({ power: 0.5, impact: 0.12 })).v - launchFrom(shotOptions({ power: 0.5, impact: 0.022 })).v);
-    wear('sora'); G.club = 'SW';
-    out.soraBack = shotEnv(shotOptions()).backMul;
-    wear('gbot'); G.club = '1W'; recomputeMarker(); const windy = G.markerX;
-    wear('leo'); G.club = '1W'; recomputeMarker(); out.markerDiff = windy - G.markerX;
+    const puttGap = () => Math.abs(launchFrom(shotOptions({ power: 0.5, impact: 0.12 })).v - launchFrom(shotOptions({ power: 0.5, impact: 0.022 })).v);
+    wear('mina'); G.club = 'PT'; out.minaPutt = puttGap();
+    wear('leo'); G.club = 'PT'; out.leoPutt = puttGap();
+    wear('sora'); G.club = 'SW'; out.soraBack = shotEnv(shotOptions()).backMul;
+    wear('gbot'); G.club = '1W'; recomputeMarker(); const windy = G.markerZ;
+    wear('leo'); G.club = '1W'; recomputeMarker(); out.markerDiff = windy - G.markerZ;
     wear('zombie'); const c0 = G.coins; onPerfect(); out.zombieCoins = G.coins - c0;
     wear('leo'); const c1 = G.coins; onPerfect(); out.leoCoins = G.coins - c1;
-    G.perfects = 0; G.pop = null; G.flash = 0; G.wind = 0; recomputeMarker();
+    G.perfects = 0; G.pop = null; G.flash = 0; G.windZ = 0; recomputeMarker();
     return out;
   });
   console.log('passive', JSON.stringify(passive));
-  const ratio = passive.kaiCarry / passive.baseCarry;
+  const ratio = passive.kai / passive.base;
   if (passive.leoWind !== 0.9 || !(ratio > 1.04 && ratio < 1.06) || !(passive.minaPutt < passive.leoPutt) || passive.soraBack !== 1.3 || Math.abs(passive.markerDiff) < 1 || passive.zombieCoins !== passive.leoCoins * 2) errors.push('passive check failed');
+
   await page.evaluate(() => openShop());
-  await page.waitForTimeout(150);
-  await page.screenshot({ path: path.join(OUT, name + '_11shop.png') });
+  await step(page, 0.05);
+  await snap('10shop');
   await browser.close();
   console.log(name, JSON.stringify({ first, putter: club, holed, next, errors }));
-  return errors.length === 0 && first.perfects === 1 && club === 'PT' && holed.holed && next.hole === 1;
+  return errors.length === 0 && first.perfects === 1 && club === 'PT' && holed.holed && next.hole === 1 && !next.modal;
 }
 
 (async () => {

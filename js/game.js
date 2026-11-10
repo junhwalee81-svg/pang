@@ -4,37 +4,40 @@ var GAME = {
   gaugeSpeed: 0.82,     // 파워 게이지 속도(초당 비율)
   impactSpeed: 1.2,     // 임팩트 복귀 속도
   impactFloor: -0.15,   // 임팩트 마커가 사라지는 지점
-  backswing: 205,       // 백스윙 각도(도)
-  puttBackswing: 42,
-  swingDown: 0.17,      // 다운스윙 시간(초)
+  backswing: 135,       // 백스윙 각도(도)
+  puttBackswing: 22,
+  follow: 150,          // 팔로스루 각도(도)
+  puttFollow: 24,
+  swingDown: 0.2,       // 다운스윙 시간(초)
   swingFollow: 0.55,
   autoNext: 1.15,       // 공이 멈춘 뒤 다음 샷 준비까지(초)
-  holeOutDelay: 1.9,
-  introTime: 2.1,
+  holeOutDelay: 2.4,
+  introTime: 3,
   maxStrokesOverPar: 5,
-  obMargin: 26,
+  obMargin: 26,         // 코스 끝에서 OB까지(m)
+  obSide: 140,          // 좌우 OB(m)
+  yawRange: 75,         // 조준 범위(도)
   coinsPerfect: 5,
   coinsByDiff: { '-3': 300, '-2': 180, '-1': 90, 0: 50, 1: 25 },
   coinsDefault: 10,
   coinsHoleInOne: 400,
   saveKey: 'pangpang.save.v1',
-  // 샷을 고르는 기준 거리(m)
-  clubAt: { '1W': 172, '5I': 96 },
+  clubAt: { '1W': 172, '5I': 96 },  // 샷을 고르는 기준 거리(m)
 };
 
 var SCORE_NAMES = { '-3': '알바트로스', '-2': '이글', '-1': '버디', 0: '파', 1: '보기', 2: '더블 보기', 3: '트리플 보기' };
 
 var G = {
   phase: 'title', time: 0, flash: 0, shake: 0, pop: null, treeShake: null,
-  view: { W: 380, H: 800, cy: 400, miniY: 58, playTop: 100, playH: 520 },
-  cam: { x: 0, y: 8, z: 26 },
-  hole: null, holeIndex: 0, scores: [], strokes: 0, wind: 0,
-  ball: null, lastX: 0, trail: [], trailFade: 1, fx: [],
-  golfer: { x: 0, phi: 0, expr: 'head', pose: null, bob: 0 },
-  club: '1W', swingClub: null, angle: 0, spin: 0, special: null, markerX: null,
+  view: { W: 380, H: 800, offsetY: 0 },
+  cam: { px: 0, py: 20, pz: 0, lx: 40, ly: 5, lz: 0 },
+  hole: null, titleHole: null, holeIndex: 0, scores: [], strokes: 0, wind: 0, windZ: 0,
+  ball: null, lastX: 0, lastZ: 0, trail: [], trailFade: 1, fx: [],
+  golfer: { x: 0, z: 0, yaw: 0, phi: 0, pose: null },
+  club: '1W', swingClub: null, angle: 0, spin: 0, yaw: 0, special: null, markerX: null, markerZ: null, preview: [],
   gauge: { pos: 0, dir: 1, power: 0 },
-  shot: null, shotStyle: null, stopT: 0, swingT: 0, launched: false, phiTop: 0,
-  perfects: 0, introT: 0, holedT: 0, resultShown: false, penaltyMsg: null, accum: 0,
+  shot: null, shotStyle: null, stopT: 0, swingT: 0, launched: false, phiTop: 0, followT: null,
+  perfects: 0, introT: 0, holedT: 0, resultShown: false, accum: 0,
   coins: 0, owned: {}, equip: Object.assign({}, DEFAULT_EQUIP), best: null, stats: null, test: false,
 };
 
@@ -66,7 +69,7 @@ function loadGame() {
 
 function refreshStats() {
   G.stats = sumStats(G.equip, ITEMS);
-  if (G.ball) recomputeMarker();
+  if (G.ball && G.hole) recomputeMarker();
 }
 
 /* ───────── 라운드 ───────── */
@@ -83,38 +86,76 @@ function loadHole(i) {
   G.strokes = 0;
   G.perfects = 0;
   G.resultShown = false;
-  const w = G.hole.wind;
-  G.wind = Math.round((Math.random() * 2 - 1) * w * 10) / 10;
-  G.ball = makeBall(0, heightAt(G.hole, 0));
+  const speed = Math.random() * G.hole.wind;
+  const dir = Math.random() * Math.PI * 2;
+  G.wind = Math.round(Math.cos(dir) * speed * 10) / 10;
+  G.windZ = Math.round(Math.sin(dir) * speed * 10) / 10;
+  G.ball = makeBall(0, heightAt(G.hole, 0, 0), 0);
   G.lastX = 0;
+  G.lastZ = 0;
   G.trail = [];
   G.fx = [];
   G.pop = null;
   G.golfer.pose = null;
+  G.followT = null;
   G.introT = GAME.introTime;
   G.phase = 'intro';
-  G.cam.x = G.hole.cup;
-  G.cam.z = 12;
-  G.cam.y = heightAt(G.hole, G.hole.cup) + 8;
   pickClub();
-  G.golfer.x = golferSpot();
-  G.golfer.phi = clubRig(G.club).tilt;
+  G.yaw = autoYaw();
+  syncGolfer();
   recomputeMarker();
 }
 
-function golferSpot() { return G.ball.x - clubRig(G.club).reach * RIG.spriteToWorld; }
+function aimVector() {
+  const a = (G.yaw * Math.PI) / 180;
+  return { x: Math.cos(a), z: Math.sin(a) };
+}
+
+function cupPos() { return { x: G.hole.cup, z: holeShapes(G.hole).cupZ }; }
+
+function distToCup() {
+  const c = cupPos();
+  return Math.hypot(c.x - G.ball.x, c.z - G.ball.z);
+}
+
+function syncGolfer() {
+  const a = (G.yaw * Math.PI) / 180;
+  const reach = clubReach(G.club);
+  // 오른손잡이: 목표가 왼쪽이므로 공 왼쪽에 서서 공을 바라본다
+  G.golfer.yaw = a;
+  G.golfer.x = G.ball.x + Math.sin(a) * reach;
+  G.golfer.z = G.ball.z - Math.cos(a) * reach;
+  G.golfer.phi = 0;
+}
+
+function currentCarry() {
+  return simulateShot(shotOptions({ ignoreHazards: true, yaw: 0, hole: undefined, x: 0, z: 0, lie: lieMul(G.ball.x, G.ball.z, G.club) })).carry;
+}
+
+/** 핀이 닿는 거리면 핀을, 아니면 페어웨이 중심의 낙하 지점을 겨눈다 */
+function autoYaw() {
+  const b = G.ball, c = cupPos();
+  const d = distToCup();
+  let tx = c.x, tz = c.z;
+  if (G.club !== 'PT' && d > currentCarry() + 18) {
+    tx = Math.min(b.x + currentCarry(), G.hole.cup);
+    tz = centerZ(G.hole, tx);
+  }
+  return (Math.atan2(tz - b.z, tx - b.x) * 180) / Math.PI;
+}
 
 function pickClub() {
   const hole = G.hole, b = G.ball;
-  const d = hole.cup - b.x;
-  if (surfaceAt(hole, b.x) === 'green') { G.club = 'PT'; return; }
-  if (d >= GAME.clubAt['1W'] && surfaceAt(hole, b.x) !== 'bunker') G.club = '1W';
-  else if (d >= GAME.clubAt['5I'] && surfaceAt(hole, b.x) !== 'bunker') G.club = '5I';
+  const d = distToCup();
+  const s = surfaceAt(hole, b.x, b.z);
+  if (s === 'green') { G.club = 'PT'; return; }
+  if (d >= GAME.clubAt['1W'] && s !== 'bunker') G.club = '1W';
+  else if (d >= GAME.clubAt['5I'] && s !== 'bunker') G.club = '5I';
   else G.club = 'SW';
 }
 
-function lieMul(x, club) {
-  const type = surfaceAt(G.hole, x);
+function lieMul(x, z, club) {
+  const type = surfaceAt(G.hole, x, z);
   const t = TERRAIN_LIE[type] || 1;
   return club === 'SW' && type === 'bunker' ? TERRAIN_LIE.bunkerWedge : t;
 }
@@ -133,16 +174,38 @@ function passiveOptions() {
 
 function shotOptions(extra) {
   return Object.assign(passiveOptions(), {
-    club: G.club, power: 1, angle: G.angle, spin: G.spin, stats: G.stats, impact: 0,
-    hole: G.hole, x: G.ball.x, wind: 0, lie: lieMul(G.ball.x, G.club), special: G.club === 'PT' ? null : G.special,
+    club: G.club, power: 1, angle: G.angle, spin: G.spin, yaw: G.yaw, stats: G.stats, impact: 0,
+    hole: G.hole, x: G.ball.x, z: G.ball.z, wind: 0, windZ: 0, lie: lieMul(G.ball.x, G.ball.z, G.club), special: G.club === 'PT' ? null : G.special,
   }, extra || {});
 }
 
 function recomputeMarker() {
   if (!G.hole || !G.ball) return;
-  if (G.club === 'PT') { G.markerX = null; return; }
-  const r = simulateShot(shotOptions({ ignoreHazards: true, wind: currentPassive().kind === 'windMarker' ? G.wind : 0 }));
-  G.markerX = G.ball.x + r.carry;
+  const windy = currentPassive().kind === 'windMarker';
+  const o = shotOptions({ ignoreHazards: true, wind: windy ? G.wind : 0, windZ: windy ? G.windZ : 0 });
+  G.preview = [];
+  if (G.club === 'PT') {
+    G.markerX = G.markerZ = null;
+    const d = Math.min(distToCup() + 1.5, 26);
+    const v = aimVector();
+    for (let i = 1; i <= 26; i++) {
+      const u = (i / 26) * d;
+      const x = G.ball.x + v.x * u, z = G.ball.z + v.z * u;
+      G.preview.push({ x, y: heightAt(G.hole, x, z) + 0.04, z });
+    }
+    return;
+  }
+  const lp = launchFrom(o);
+  const b = makeBall(G.ball.x, G.ball.y, G.ball.z);
+  b.seed = 7;
+  launchBall(b, lp);
+  const env = shotEnv(o);
+  let guard = 0;
+  while (b.mode === 'air' && guard++ < 4000) {
+    stepBall(b, G.hole, env, PHYS.dt);
+  }
+  G.markerX = b.x;
+  G.markerZ = b.z;
 }
 
 function specialUnlocked() { return G.perfects >= SPECIAL_UNLOCK; }
@@ -166,17 +229,19 @@ function readyShot() {
   G.shotStyle = null;
   G.swingClub = null;
   G.golfer.pose = null;
-  G.golfer.expr = 'head';
+  G.followT = null;
   pickClub();
-  G.golfer.x = golferSpot();
-  G.golfer.phi = clubRig(G.club).tilt;
+  G.yaw = autoYaw();
+  syncGolfer();
   recomputeMarker();
 }
 
-/** 공 위치를 옮기고 샷을 준비한다(개발·테스트용) */
-function placeBall(x) {
-  G.ball = makeBall(x, heightAt(G.hole, x));
+/** 공 위치를 옮기고 샷을 준비한다(개발·테스트용). z를 안 주면 코스 중심선 */
+function placeBall(x, z) {
+  const zz = z === undefined ? centerZ(G.hole, x) : z;
+  G.ball = makeBall(x, heightAt(G.hole, x, zz), zz);
   G.lastX = x;
+  G.lastZ = zz;
   G.trail = [];
   G.stopT = 0;
   readyShot();
@@ -188,7 +253,7 @@ function readyNextShot() {
   if (G.phase === 'holed' || G.phase === 'score') { nextHole(); return; }
   if (G.phase === 'intro') { readyShot(); updateCamera(5); return; }
   if (G.phase === 'ball') { G.ball.mode = 'stop'; G.ball.events.length = 0; }
-  if (G.phase === 'ball' || G.phase === 'stopped') readyShot();
+  if (G.phase === 'ball' || G.phase === 'stopped') { readyShot(); updateCamera(5); }
 }
 
 function nextHole() {
@@ -204,8 +269,7 @@ function setClub(id) {
   G.angle = 0;
   G.spin = 0;
   if (id === 'PT') G.special = null;
-  G.golfer.x = golferSpot();
-  G.golfer.phi = clubRig(id).tilt;
+  syncGolfer();
   recomputeMarker();
   SFX.play('ui');
 }
@@ -225,6 +289,14 @@ function setSpin(delta) {
   SFX.play('ui');
 }
 
+/** 좌우 조준(도, +는 오른쪽) */
+function setYaw(delta) {
+  if (G.phase !== 'aim') return;
+  G.yaw = clamp(G.yaw + delta, -GAME.yawRange * 2, GAME.yawRange * 2);
+  syncGolfer();
+  recomputeMarker();
+}
+
 /** 3단 입력: 시작 → 파워 고정 → 임팩트 */
 function pressShot() {
   if (G.phase === 'intro') { readyShot(); updateCamera(5); return; }
@@ -232,7 +304,6 @@ function pressShot() {
     G.phase = 'power';
     G.gauge.pos = 0;
     G.gauge.dir = 1;
-    G.golfer.expr = 'headFocus';
     SFX.play('gauge');
   } else if (G.phase === 'power') {
     G.gauge.power = Math.max(0.02, G.gauge.pos);
@@ -258,10 +329,11 @@ function launchNow() {
   const o = shotOptions({ power: s.power, impact: s.impact });
   const lp = launchFrom(o);
   G.lastX = G.ball.x;
-  G.ball = makeBall(G.ball.x, G.ball.y);
+  G.lastZ = G.ball.z;
+  G.ball = makeBall(G.ball.x, G.ball.y, G.ball.z);
   G.ball.seed = (Math.random() * 2147483647) | 0;
   launchBall(G.ball, lp);
-  G.env = shotEnv(Object.assign({}, o, { wind: G.wind }));
+  G.env = shotEnv(Object.assign({}, o, { wind: G.wind, windZ: G.windZ }));
   G.strokes++;
   G.shotStyle = o.special || (lp.perfect ? 'perfect' : null);
   G.trail = [];
@@ -270,10 +342,9 @@ function launchNow() {
   G.accum = 0;
   if (lp.perfect) onPerfect(o.special);
   else {
-    if (o.special) G.pop = { text: SPECIAL_SHOTS[o.special].name, t: 0.8, max: 0.8, fill: '#ffffff', stroke: 'rgba(40,20,110,.92)' };
-    G.golfer.expr = lp.miss > 0.14 ? 'headShock' : 'head';
+    if (o.special) G.pop = { text: SPECIAL_SHOTS[o.special].name, t: 0.8, max: 0.8, fill: '#ffffff' };
     SFX.play('hit', G.swingClub);
-    spawn('smoke', G.ball.x, G.ball.y + 0.2, 4, { color: '#f4f0d0', size: 34, speed: 3, life: 0.5, up: 1 });
+    spawn('smoke', G.ball.x, G.ball.y + 0.1, G.ball.z, 4, { color: '#f4f0d0', size: 0.5, speed: 1.5, life: 0.5, up: 0.6 });
   }
 }
 
@@ -282,15 +353,14 @@ function onPerfect(special) {
   G.perfects++;
   const pas = currentPassive();
   G.coins += GAME.coinsPerfect * (pas.kind === 'perfectCoinMul' ? pas.value : 1);
-  G.golfer.expr = 'head';
-  G.flash = 0.62;
+  G.flash = 0.55;
   G.shake = 9;
   const newly = !unlockedBefore && specialUnlocked();
   const sub = special ? SPECIAL_SHOTS[special].name + ' 퍼펙트' : newly ? '특수샷 해금!' : '퍼펙트 임팩트';
-  G.pop = { text: '팡!', sub, t: 0.95, max: 0.95, big: true, color: 'rgba(255,214,90,.5)' };
+  G.pop = { text: '팡!', sub, t: 0.95, max: 0.95, big: true };
   SFX.play('hitPerfect', G.swingClub);
-  spawn('star', G.ball.x, G.ball.y + 0.3, 16, { color: '#ffe066', size: 26, speed: 11, life: 0.75, add: true });
-  spawn('ring', G.ball.x, G.ball.y + 0.3, 1, { color: '#ffffff', size: 60, speed: 0, life: 0.42, add: true, grow: 5 });
+  spawn('star', G.ball.x, G.ball.y + 0.15, G.ball.z, 18, { color: '#ffe066', size: 0.32, speed: 5, life: 0.75, add: true });
+  spawn('ring', G.ball.x, G.ball.y + 0.15, G.ball.z, 1, { color: '#fff3c0', size: 0.5, speed: 0, life: 0.34, add: true, grow: 4 });
 }
 
 /* ───────── 매 프레임 ───────── */
@@ -302,24 +372,17 @@ function updateGame(dt) {
   if (G.pop) { G.pop.t -= dt; if (G.pop.t <= 0) G.pop = null; }
   if (G.treeShake) { G.treeShake.t -= dt; if (G.treeShake.t <= 0) G.treeShake = null; }
   updateFx(dt);
-  if (!G.hole) {
-    G.cam.z = 15;
-    G.cam.x = 74 + Math.sin(G.time * 0.09) * 42;
-    G.cam.y = heightAt(HOLES[0], G.cam.x) + (G.view.H * 0.3) / G.cam.z;
-    return;
-  }
+  if (!G.hole) { updateTitleCamera(); return; }
   const p = G.phase;
   if (p === 'intro') {
     G.introT -= dt;
-    if (G.introT <= 0) readyShot();
-  } else if (p === 'aim') {
-    G.golfer.bob = Math.sin(G.time * 2.3) * 0.8;
+    if (G.introT <= 0) { readyShot(); updateCamera(5); }
   } else if (p === 'power') {
     const g = G.gauge;
     g.pos += g.dir * GAME.gaugeSpeed * dt;
     if (g.pos >= 1) { g.pos = 1; g.dir = -1; }
-    if (g.pos <= 0 && g.dir < 0) { g.pos = 0; G.phase = 'aim'; G.golfer.expr = 'head'; }
-    G.golfer.phi = backswingAngle(g.pos);
+    if (g.pos <= 0 && g.dir < 0) { g.pos = 0; G.phase = 'aim'; G.golfer.phi = 0; }
+    G.golfer.phi = -g.pos * (G.club === 'PT' ? GAME.puttBackswing : GAME.backswing);
   } else if (p === 'impact') {
     const g = G.gauge;
     g.pos -= GAME.impactSpeed * dt;
@@ -335,22 +398,30 @@ function updateGame(dt) {
     if (G.stopT <= 0) readyShot();
   } else if (p === 'holed') {
     G.holedT -= dt;
-    G.golfer.pose = Math.sin(G.time * 7) > 0 ? 'cheer0' : 'cheer1';
+    G.golfer.pose = 'dance';
     if (G.holedT <= 0) finishHole();
   }
   updateCamera(dt);
 }
 
-function backswingAngle(pos) {
-  const tilt = clubRig(G.club).tilt;
-  return tilt - pos * (G.club === 'PT' ? GAME.puttBackswing : GAME.backswing);
+function updateTitleCamera() {
+  const h = G.titleHole;
+  if (!h) return;
+  const S = holeShapes(h);
+  const a = G.time * 0.09;
+  const y = heightAt(h, S.green.cx, S.green.cz);
+  G.cam.px = S.green.cx + Math.cos(a) * 62;
+  G.cam.pz = S.green.cz + Math.sin(a) * 62;
+  G.cam.py = y + 16;
+  G.cam.lx = S.green.cx;
+  G.cam.ly = y + 7;
+  G.cam.lz = S.green.cz;
 }
 
 function updateSwing(dt) {
   G.swingT += dt;
-  const tilt = clubRig(G.swingClub).tilt;
   const u = clamp(G.swingT / GAME.swingDown, 0, 1);
-  G.golfer.phi = lerp(G.phiTop, tilt, u * u);
+  G.golfer.phi = G.phiTop * (1 - u * u);
   if (u >= 1 && !G.launched) {
     launchNow();
     G.followT = 0;
@@ -361,10 +432,9 @@ function updateSwing(dt) {
 function updateFollow(dt) {
   if (G.followT == null) return;
   G.followT += dt;
-  const tilt = clubRig(G.swingClub || G.club).tilt;
-  const end = G.swingClub === 'PT' ? tilt + 42 : tilt + 215;
+  const end = G.swingClub === 'PT' ? GAME.puttFollow : GAME.follow;
   const u = clamp(G.followT / GAME.swingFollow, 0, 1);
-  G.golfer.phi = lerp(tilt, end, 1 - (1 - u) * (1 - u));
+  G.golfer.phi = end * (1 - (1 - u) * (1 - u));
 }
 
 function updateBall(dt) {
@@ -376,13 +446,13 @@ function updateBall(dt) {
   }
   for (const ev of b.events) handleBallEvent(ev);
   b.events.length = 0;
-  if (b.mode === 'air' || Math.hypot(b.vx, b.vy) > 1) {
-    G.trail.push({ x: b.x, y: b.y + 0.25 });
-    if (G.trail.length > 64) G.trail.shift();
+  if (b.mode === 'air' || Math.hypot(b.vx, b.vz) > 1) {
+    G.trail.push({ x: b.x, y: b.y + 0.04, z: b.z });
+    if (G.trail.length > 90) G.trail.shift();
   } else if (G.trail.length) {
     G.trail.shift();
   }
-  if (b.x > G.hole.end + GAME.obMargin || b.x < -GAME.obMargin) { penalty('OB', '#ff8a5a'); return; }
+  if (b.x > G.hole.end + GAME.obMargin || b.x < -GAME.obMargin || Math.abs(b.z - centerZ(G.hole, b.x)) > GAME.obSide) { penalty('OB', '#ff8a5a'); return; }
   if (b.mode === 'stop') resolveBall();
 }
 
@@ -391,40 +461,37 @@ function handleBallEvent(ev) {
     SFX.play('bounce', ev.surface);
     if (G.ball.bounces === 1 && SPECIAL_SHOTS[G.shotStyle]) {
       const sp = SPECIAL_SHOTS[G.shotStyle];
-      spawn('ring', ev.x, ev.y + 0.1, 1, { color: sp.glow, size: 46, speed: 0, life: 0.5, grow: 4, add: true });
-      spawn('spark', ev.x, ev.y + 0.2, 14, { color: sp.glow, size: 22, speed: 10, life: 0.55, up: 3, add: true });
-      G.shake = Math.max(G.shake, G.shotStyle === 'tomahawk' ? 8 : 4);
+      spawn('ring', ev.x, ev.y + 0.1, ev.z, 1, { color: sp.glow, size: 2, speed: 0, life: 0.5, grow: 4, add: true });
+      spawn('spark', ev.x, ev.y + 0.2, ev.z, 14, { color: sp.glow, size: 0.5, speed: 7, life: 0.55, up: 3, add: true });
     }
     const c = ev.surface === 'bunker' ? '#f5dfa6' : ev.surface === 'green' ? '#d8ffae' : '#c9e88a';
-    spawn('smoke', ev.x, ev.y + 0.1, Math.min(9, 3 + (ev.speed | 0)), { color: c, size: 34, speed: 3.6, life: 0.62, up: 2.4 });
+    spawn('smoke', ev.x, ev.y + 0.1, ev.z, Math.min(9, 3 + (ev.speed | 0)), { color: c, size: 0.8, speed: 2.4, life: 0.62, up: 1.6 });
   } else if (ev.kind === 'water') {
     SFX.play('splash');
     const t = prepareHole(G.hole);
-    const lv = t.level.find((p) => ev.x >= p.from && ev.x <= p.to);
-    const y = lv ? lv.y : ev.y;
-    spawn('smoke', ev.x, y + 0.4, 18, { color: '#d8f4ff', size: 28, speed: 7.4, life: 0.8, up: 8, grav: 16 });
-    spawn('ring', ev.x, y + 0.1, 2, { color: '#ffffff', size: 40, speed: 0, life: 0.7, grow: 3, add: true });
+    let y = ev.y;
+    for (const p of t.level) if (Math.hypot((ev.x - p.cx) / p.rx, (ev.z - p.cz) / p.rz) < 1) y = p.y;
+    spawn('smoke', ev.x, y + 0.3, ev.z, 18, { color: '#d8f4ff', size: 0.7, speed: 4.5, life: 0.8, up: 6, grav: 14 });
+    spawn('ring', ev.x, y + 0.1, ev.z, 2, { color: '#ffffff', size: 1.2, speed: 0, life: 0.7, grow: 3, add: true });
   } else if (ev.kind === 'cup') {
     SFX.play('cup');
   } else if (ev.kind === 'tree') {
     const hit = ev.surface === 'hit';
     SFX.play('leaves', hit);
-    G.treeShake = { x: ev.treeX, t: hit ? 0.6 : 0.3, max: 0.6 };
-    const leaf = THEMES[G.hole.theme].trees[0].includes('Orange') ? '#f2a03d' : '#5fcf72';
-    spawn('smoke', ev.x, ev.y, hit ? 16 : 6, { color: leaf, size: 14, speed: 6, life: 1.1, up: 1, grav: 5 });
-    if (hit && !G.pop) G.pop = { text: '부스럭!', t: 0.6, max: 0.6, fill: '#c9ffb0', stroke: 'rgba(20,70,40,.92)' };
+    G.treeShake = { index: ev.tree, t: hit ? 0.6 : 0.3, max: 0.6 };
+    const leaf = G.hole.theme === 'autumn' ? '#f2a03d' : '#5fcf72';
+    spawn('smoke', ev.x, ev.y, ev.z, hit ? 16 : 6, { color: leaf, size: 0.45, speed: 5, life: 1.1, up: 1, grav: 5 });
+    if (hit && !G.pop) G.pop = { text: '부스럭!', t: 0.6, max: 0.6, fill: '#c9ffb0' };
   } else if (ev.kind === 'trunk') {
     SFX.play('trunk');
-    G.treeShake = { x: ev.treeX, t: 0.4, max: 0.6 };
-    G.shake = Math.max(G.shake, 5);
-    spawn('smoke', ev.x, ev.y + 0.3, 6, { color: '#b98a5a', size: 16, speed: 4, life: 0.5, up: 2 });
-    if (!G.pop) G.pop = { text: '쿵!', t: 0.6, max: 0.6, fill: '#ffe2b0', stroke: 'rgba(70,40,20,.92)' };
+    G.treeShake = { index: ev.tree, t: 0.4, max: 0.6 };
+    spawn('smoke', ev.x, ev.y + 0.3, ev.z, 6, { color: '#b98a5a', size: 0.5, speed: 3, life: 0.5, up: 1.5 });
+    if (!G.pop) G.pop = { text: '쿵!', t: 0.6, max: 0.6, fill: '#ffe2b0' };
   } else if (ev.kind === 'rock') {
     SFX.play('rock');
-    spawn('spark', ev.x, ev.y + 0.3, 10, { color: '#fff1c2', size: 16, speed: 9, life: 0.4, up: 3, add: true });
-    spawn('smoke', ev.x, ev.y + 0.2, 4, { color: '#cfd4da', size: 24, speed: 3, life: 0.5, up: 1.5 });
-    G.shake = Math.max(G.shake, 5);
-    if (!G.pop && ev.speed >= HAZARD.rockMinSpeed) G.pop = { text: '딱!', t: 0.6, max: 0.6, fill: '#ffffff', stroke: 'rgba(40,50,70,.92)' };
+    spawn('spark', ev.x, ev.y + 0.2, ev.z, 10, { color: '#fff1c2', size: 0.35, speed: 6, life: 0.4, up: 2, add: true });
+    spawn('smoke', ev.x, ev.y + 0.2, ev.z, 4, { color: '#cfd4da', size: 0.6, speed: 2, life: 0.5, up: 1 });
+    if (!G.pop && ev.speed >= HAZARD.rockMinSpeed) G.pop = { text: '딱!', t: 0.6, max: 0.6, fill: '#ffffff' };
   } else if (ev.kind === 'lip') {
     SFX.play('lip');
   }
@@ -433,8 +500,7 @@ function handleBallEvent(ev) {
 function resolveBall() {
   const b = G.ball;
   if (b.holed) { holeOut(); return; }
-  const type = surfaceAt(G.hole, b.x);
-  if (type === 'water') { penalty('워터 해저드', '#7fd6ff'); return; }
+  if (surfaceAt(G.hole, b.x, b.z) === 'water') { penalty('워터 해저드', '#7fd6ff'); return; }
   if (G.strokes >= G.hole.par + GAME.maxStrokesOverPar) { giveUp(); return; }
   G.phase = 'stopped';
   G.stopT = GAME.autoNext;
@@ -442,9 +508,8 @@ function resolveBall() {
 
 function penalty(text, color) {
   G.strokes++;
-  G.pop = { text, sub: '1벌타 · 원위치', t: 1.1, max: 1.1, fill: color, stroke: 'rgba(10,30,60,.92)' };
-  const back = G.lastX;
-  G.ball = makeBall(back, heightAt(G.hole, back));
+  G.pop = { text, sub: '1벌타 · 원위치', t: 1.1, max: 1.1, fill: color };
+  G.ball = makeBall(G.lastX, heightAt(G.hole, G.lastX, G.lastZ), G.lastZ);
   G.trail = [];
   if (G.strokes >= G.hole.par + GAME.maxStrokesOverPar) { giveUp(); return; }
   G.phase = 'stopped';
@@ -452,8 +517,7 @@ function penalty(text, color) {
 }
 
 function giveUp() {
-  G.golfer.expr = 'headShock';
-  G.pop = { text: '다음 기회에', t: 1.2, max: 1.2, fill: '#ffffff', stroke: 'rgba(10,30,60,.9)' };
+  G.pop = { text: '다음 기회에', t: 1.2, max: 1.2, fill: '#ffffff' };
   G.phase = 'holed';
   G.holedT = 1.3;
 }
@@ -466,9 +530,11 @@ function scoreName(diff, strokes) {
 function holeOut() {
   const diff = G.strokes - G.hole.par;
   const name = scoreName(diff, G.strokes);
-  G.pop = { text: name, sub: G.strokes + '타로 홀아웃', t: 1.7, max: 1.7, big: diff < 0, color: 'rgba(120,235,255,.42)', fill: diff < 0 ? '#ffe25a' : '#ffffff', stroke: 'rgba(16,48,110,.95)' };
-  spawn('star', G.hole.cup, heightAt(G.hole, G.hole.cup) + 1, 26, { color: '#ffe680', size: 24, speed: 9, life: 1.1, up: 7, add: true, grav: 9 });
-  spawn('magic', G.hole.cup, heightAt(G.hole, G.hole.cup) + 1, 12, { color: '#9df0ff', size: 40, speed: 4, life: 0.9, up: 6, add: true });
+  G.pop = { text: name, sub: G.strokes + '타로 홀아웃', t: 1.9, max: 1.9, big: diff < 0, fill: diff < 0 ? '#ffe25a' : '#ffffff' };
+  const c = cupPos();
+  const y = heightAt(G.hole, c.x, c.z);
+  spawn('star', c.x, y + 0.6, c.z, 26, { color: '#ffe680', size: 0.5, speed: 5, life: 1.1, up: 4, add: true, grav: 6 });
+  spawn('magic', c.x, y + 0.6, c.z, 12, { color: '#9df0ff', size: 0.9, speed: 2.5, life: 0.9, up: 3, add: true });
   G.phase = 'holed';
   G.holedT = GAME.holeOutDelay;
   if (diff < 0) setTimeout(() => SFX.play('fanfare'), 700);
@@ -503,16 +569,15 @@ function finishRound() {
 
 /* ───────── 입자 ───────── */
 
-function spawn(tex, x, y, n, o) {
+function spawn(tex, x, y, z, n, o) {
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2;
+    const a = Math.random() * Math.PI * 2, b = Math.random() * Math.PI * 2;
     const s = (o.speed || 0) * (0.35 + Math.random() * 0.75);
     const life = (o.life || 0.6) * (0.75 + Math.random() * 0.45);
-    G.fx.push({ tex, x, y, vx: Math.cos(a) * s, vy: Math.abs(Math.sin(a)) * s + (o.up || 0), life, max: life,
-      size: (o.size || 20) * (0.7 + Math.random() * 0.6), rot: Math.random() * 6.28, spin: (Math.random() - 0.5) * 5,
-      color: o.color || '#ffffff', add: !!o.add, grow: o.grow || 0.9, grav: o.grav == null ? 2.5 : o.grav, alpha: o.alpha || 1 });
+    G.fx.push({ tex, x, y, z, vx: Math.cos(a) * s * Math.cos(b), vy: Math.abs(Math.sin(b)) * s + (o.up || 0), vz: Math.sin(a) * s * Math.cos(b), life, max: life,
+      size: (o.size || 0.5) * (0.7 + Math.random() * 0.6), color: o.color || '#ffffff', add: !!o.add, grow: o.grow || 0.9, grav: o.grav == null ? 2.5 : o.grav, alpha: o.alpha || 1 });
   }
-  if (G.fx.length > 260) G.fx.splice(0, G.fx.length - 260);
+  if (G.fx.length > 180) G.fx.splice(0, G.fx.length - 180);
 }
 
 function updateFx(dt) {
@@ -523,48 +588,74 @@ function updateFx(dt) {
     p.vy -= p.grav * dt;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.rot += p.spin * dt;
+    p.z += p.vz * dt;
   }
 }
 
 /* ───────── 카메라 ───────── */
 
-function aimZoom() { return clamp(Math.min(G.view.W, G.view.playH * 0.95) / 15, 24, 38); }
-
 function updateCamera(dt) {
-  const V = G.view, b = G.ball, hole = G.hole;
-  let tx, ty, tz, rate = 3.4;
-  const gy = heightAt(hole, b.x);
-  const groundOffset = (z) => (V.playH * 0.28) / z;
-  if (G.phase === 'intro') {
+  const b = G.ball, hole = G.hole, c = G.cam;
+  const aim = aimVector();
+  const gy = heightAt(hole, b.x, b.z);
+  let px, py, pz, lx, ly, lz, rate = 4;
+  const p = G.phase;
+  if (p === 'intro') {
     const u = 1 - smooth(G.introT / GAME.introTime);
-    tx = lerp(hole.cup, b.x, u);
-    tz = lerp(13, aimZoom(), u * u);
-    ty = heightAt(hole, tx) + groundOffset(tz);
+    const cup = cupPos();
+    const fx = lerp(0, cup.x - 30, u);
+    const fz = centerZ(hole, fx);
+    px = fx - 24; pz = centerZ(hole, Math.max(fx - 24, 0));
+    py = heightAt(hole, fx, fz) + lerp(26, 18, u);
+    lx = fx + 80; lz = centerZ(hole, Math.min(fx + 80, cup.x));
+    ly = heightAt(hole, lx, lz) + 2;
     rate = 8;
-  } else if (G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact' || G.phase === 'swing') {
+  } else if (p === 'aim' || p === 'power' || p === 'impact' || p === 'swing') {
     if (G.club === 'PT') {
-      const d = Math.abs(hole.cup - b.x);
-      tz = clamp((V.W * 0.6) / (d + 4), 12, aimZoom());
-      tx = lerp(b.x, hole.cup, 0.5) - 0.06 * V.W / tz;
+      const d = Math.min(distToCup(), 28);
+      const back = 2.9 + d * 0.12;
+      const up = 1.35 + d * 0.11;
+      px = b.x - aim.x * back + aim.z * 0.34;
+      pz = b.z - aim.z * back - aim.x * 0.34;
+      py = gy + up;
+      lx = b.x + aim.x * (d * 0.55 + 1);
+      lz = b.z + aim.z * (d * 0.55 + 1);
+      ly = heightAt(hole, lx, lz) + 0.2;
     } else {
-      tz = aimZoom();
-      tx = G.golfer.x + (V.W / 2 - Math.max(V.W * 0.2, (78 * tz) / 30 + 10)) / tz;
+      // 캐릭터와 공이 함께 보이도록 둘 사이 뒤쪽에 선다
+      const side = clubReach(G.club) * 0.52;
+      px = b.x - aim.x * 6.2 + aim.z * side;
+      pz = b.z - aim.z * 6.2 - aim.x * side;
+      py = gy + 2.5;
+      lx = b.x + aim.x * 40 + aim.z * side;
+      lz = b.z + aim.z * 40 - aim.x * side;
+      ly = gy + 1.7;
     }
-    ty = gy + groundOffset(tz);
-  } else if (b.holed || G.phase === 'holed') {
-    tz = 26;
-    tx = b.x;
-    ty = gy + groundOffset(tz);
+    rate = 7;
+  } else if (p === 'holed' || p === 'score' || b.holed) {
+    const cup = cupPos();
+    const y = heightAt(hole, cup.x, cup.z);
+    const a = G.time * 0.25;
+    px = cup.x - Math.cos(a) * 7; pz = cup.z - Math.sin(a) * 7; py = y + 2.6;
+    lx = cup.x; lz = cup.z; ly = y + 0.5;
+    rate = 2.6;
   } else {
-    const alt = b.y - gy;
-    tz = clamp((V.playH * 0.56) / (alt + 8), 7, 24);
-    tx = b.x + Math.sign(b.vx || 1) * (V.W * 0.11) / tz;
-    ty = gy + Math.max(groundOffset(tz), alt * 0.5);
-    rate = 5;
+    const h = Math.hypot(b.vx, b.vz);
+    const dir = h > 1.5 ? { x: b.vx / h, z: b.vz / h } : G.camDir || aim;
+    G.camDir = dir;
+    const alt = Math.max(0, b.y - gy);
+    const back = b.mode === 'air' ? 13 + alt * 0.25 : 8;
+    px = b.x - dir.x * back;
+    pz = b.z - dir.z * back;
+    py = Math.max(b.y + 3.5 - alt * 0.12, gy + 3.2);
+    lx = b.x + dir.x * 8;
+    lz = b.z + dir.z * 8;
+    ly = b.y + (b.mode === 'air' ? -1.5 : 0.2);
+    rate = 6;
   }
   const k = 1 - Math.exp(-rate * dt);
-  G.cam.x += (tx - G.cam.x) * (G.phase === 'ball' ? Math.min(1, k * 2.4) : k);
-  G.cam.y += (ty - G.cam.y) * k;
-  G.cam.z += (tz - G.cam.z) * k;
+  c.px += (px - c.px) * k; c.py += (py - c.py) * k; c.pz += (pz - c.pz) * k;
+  c.lx += (lx - c.lx) * k; c.ly += (ly - c.ly) * k; c.lz += (lz - c.lz) * k;
+  c.py = Math.max(c.py, heightAt(hole, c.px, c.pz) + 1);
+  if (G.shake > 0) c.py += Math.sin(G.time * 91) * G.shake * 0.006;
 }

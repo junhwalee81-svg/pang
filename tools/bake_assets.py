@@ -1,8 +1,7 @@
-"""CC0 원본 그림을 줄여 js/assets.js(data URI)로 굽는다.
+"""CC0 원본을 줄여 js/assets.js(data URI)로 굽는다.
 
-사용법: py -I tools/bake_assets.py <Kenney 2D 폴더> <공용에셋 폴더>
-Kenney 2D 폴더 안에 toon-characters, background-elements-remastered,
-foliage-pack, particle-pack 이 있어야 한다.
+사용법: py -I tools/bake_assets.py <particle-pack 폴더> <공용에셋 폴더> <golfer.glb>
+golfer.glb 는 공용에셋 tools/gltf-pack 으로 UAL1_Standard.glb 에서 Idle_Loop, Dance_Loop 만 남긴 것.
 """
 import base64
 import io
@@ -10,95 +9,69 @@ import json
 import os
 import sys
 
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageStat
 
-KENNEY, SHARED = sys.argv[1], sys.argv[2]
+Image.MAX_IMAGE_PIXELS = None
+
+PARTICLE, SHARED, GLB = sys.argv[1], sys.argv[2], sys.argv[3]
 OUT = os.path.join(os.path.dirname(__file__), '..', 'js', 'assets.js')
+SAMJOKO = os.path.join(SHARED, '받은에셋', 'samjoko')
 
-CHARS = {
-    'leo': ('Male adventurer', 'maleAdventurer'),
-    'mina': ('Female adventurer', 'femaleAdventurer'),
-    'kai': ('Male person', 'malePerson'),
-    'sora': ('Female person', 'femalePerson'),
-    'zombie': ('Zombie', 'zombie'),
-    'gbot': ('Robot', 'robot'),
+SKIES = {
+    'spring': 'kloofendal_48d_partly_cloudy_puresky',
+    'autumn': 'autumn_field_puresky',
+    'beach': 'citrus_orchard_puresky',
+    'dusk': 'qwantani_sunset_puresky',
 }
-PARTS = ['head', 'headFocus', 'headShock', 'body', 'arm', 'hand', 'leg', 'legBend']
-POSES = {'idle': 400, 'cheer0': 400, 'cheer1': 400}
-
-BG = 'background-elements-remastered/PNG/Retina'
-SCENERY = {
-    'tree': 'tree', 'treeLong': 'treeLong', 'treeOrange': 'treeOrange',
-    'treeLongOrange': 'treeLongOrange', 'treePine': 'treePine',
-    'treePalm': 'treePalm', 'treeSmall': 'treeSmall_green1',
-    'treeRound': 'treeSmall_green3', 'treeRoundOrange': 'treeSmall_orange3',
-    'bush1': 'bush1', 'bush2': 'bush2', 'bush3': 'bush3', 'bushO1': 'bushOrange1',
-    'bushO3': 'bushOrange3', 'fence': 'fence', 'house1': 'houseSmallAlt1',
-    'house2': 'houseAlt2', 'house3': 'houseSmall1', 'tower': 'towerAlt',
-}
-FOLIAGE = {
-    'flowerBlue': 1, 'flowerPurple': 3, 'flowerRed': 62, 'tuft1': 18, 'tuft2': 19,
-    'tuft3': 20, 'rock1': 53, 'rock2': 56, 'rock3': 58,
-}
+TREES = {'oak': 'tree_island_tree_02', 'maple': 'tree_jacaranda_tree', 'fir': 'tree_fir_tree_01', 'shrub': 'tree_pine_sapling_small'}
 PARTICLES = {
     'smoke': 'smoke_04', 'star': 'star_06', 'spark': 'spark_03', 'light': 'light_02',
-    'flare': 'flare_01', 'ring': 'circle_05', 'twirl': 'twirl_01', 'magic': 'magic_03',
+    'ring': 'circle_05', 'magic': 'magic_03',
 }
 TEXTURES = {'grass': 'grass004', 'turf': 'grass001', 'soil': 'ground037', 'sand': 'ground054'}
 
 
-def uri(im, quality=82, lossless=False):
+def uri(im, quality=82, kind='WEBP', exact=False):
     buf = io.BytesIO()
-    im.save(buf, 'WEBP', quality=quality, method=6, lossless=lossless)
-    return 'data:image/webp;base64,' + base64.b64encode(buf.getvalue()).decode()
-
-
-def fit(im, max_side):
-    if max(im.size) > max_side:
-        im = im.copy()
-        im.thumbnail((max_side, max_side), Image.LANCZOS)
-    return im
-
-
-def open_rgba(path):
-    return Image.open(path).convert('RGBA')
+    if kind == 'WEBP':
+        im.save(buf, 'WEBP', quality=quality, method=6, exact=exact)
+    else:
+        im.save(buf, 'JPEG', quality=quality, optimize=True)
+    return 'data:image/%s;base64,' % kind.lower() + base64.b64encode(buf.getvalue()).decode()
 
 
 def main():
-    out = {'char': {}, 'scene': {}, 'cloud': [], 'fx': {}, 'tex': {}}
-    for cid, (folder, prefix) in CHARS.items():
-        root = os.path.join(KENNEY, 'toon-characters', folder, 'PNG')
-        item = {}
-        for part in PARTS:
-            item[part] = uri(open_rgba(os.path.join(root, 'Parts HD', part + '.png')), 90)
-        for pose, size in POSES.items():
-            im = open_rgba(os.path.join(root, 'Poses HD', f'character_{prefix}_{pose}.png'))
-            item[pose] = uri(fit(im.crop(im.getbbox()), size), 88)
-        out['char'][cid] = item
-    for key, name in SCENERY.items():
-        out['scene'][key] = uri(fit(open_rgba(os.path.join(KENNEY, BG, name + '.png')), 360), 84)
-    for i in range(1, 9):
-        out['cloud'].append(uri(fit(open_rgba(os.path.join(KENNEY, BG, f'cloud{i}.png')), 320), 84))
-    foliage = os.path.join(KENNEY, 'foliage-pack', 'PNG')
-    index = {}
-    for dirpath, _, files in os.walk(foliage):
-        for name in files:
-            index[name] = os.path.join(dirpath, name)
-    for key, num in FOLIAGE.items():
-        out['scene'][key] = uri(fit(open_rgba(index[f'foliagePack_{num:03d}.png']), 180), 84)
-    fx_root = os.path.join(KENNEY, 'particle-pack', 'PNG (Transparent)')
+    out = {'sky': {}, 'tree': {}, 'fx': {}, 'tex': {}}
+    for key, name in SKIES.items():
+        im = Image.open(os.path.join(SAMJOKO, 'polyhaven_sky', name + '.jpg')).convert('RGB')
+        top = im.crop((0, 0, im.width, im.height // 2)).resize((3072, 768), Image.LANCZOS)
+        out['sky'][key] = uri(top, 68)
+    for key, name in TREES.items():
+        im = Image.open(os.path.join(SAMJOKO, 'polyhaven_trees_baked', name + '.png')).convert('RGBA')
+        r, g, b, a = im.split()
+        rgb = ImageEnhance.Brightness(Image.merge('RGB', (r, g, b))).enhance(1.5)
+        # 투명 칸의 검은색이 가장자리에 번지지 않도록 평균색으로 채운다
+        mean = ImageStat.Stat(rgb, a.point(lambda v: 255 if v > 200 else 0)).mean
+        solid = Image.new('RGB', rgb.size, tuple(int(v) for v in mean))
+        solid.paste(rgb, (0, 0), a.point(lambda v: 255 if v > 8 else 0))
+        out['tree'][key] = uri(Image.merge('RGBA', (*solid.split(), a)), 78, exact=True)
     for key, name in PARTICLES.items():
-        out['fx'][key] = uri(fit(open_rgba(os.path.join(fx_root, name + '.png')), 128), 80)
-    tex_root = os.path.join(SHARED, 'textures', 'ambientcg_512')
+        im = Image.open(os.path.join(PARTICLE, 'PNG (Transparent)', name + '.png')).convert('RGBA')
+        im.thumbnail((128, 128), Image.LANCZOS)
+        out['fx'][key] = uri(im, 80)
     for key, name in TEXTURES.items():
-        im = Image.open(os.path.join(tex_root, name + '.jpg')).convert('RGB').resize((256, 256), Image.LANCZOS)
-        out['tex'][key] = uri(ImageEnhance.Contrast(im).enhance(1.1), 62)
+        im = Image.open(os.path.join(SHARED, 'textures', 'ambientcg_512', name + '.jpg')).convert('RGB')
+        out['tex'][key] = uri(ImageEnhance.Contrast(im).enhance(1.1), 66)
+    water = Image.open(os.path.join(SAMJOKO, 'three_water', 'waternormals.jpg')).convert('RGB').resize((256, 256), Image.LANCZOS)
+    out['tex']['water'] = uri(water, 70)
+    with open(GLB, 'rb') as fh:
+        out['golfer'] = base64.b64encode(fh.read()).decode()
     text = '/* tools/bake_assets.py 로 생성 — 직접 고치지 말 것. 출처는 CREDITS.md */\n'
     text += 'var ASSETS = ' + json.dumps(out, separators=(',', ':')) + ';\n'
     with open(OUT, 'w', encoding='utf-8') as fh:
         fh.write(text)
     print('assets.js', round(len(text) / 1024), 'KB')
-    for group in ('char', 'scene', 'fx', 'tex'):
+    for group in ('sky', 'tree', 'fx', 'tex', 'golfer'):
         print(group, round(len(json.dumps(out[group])) / 1024), 'KB')
 
 

@@ -1,713 +1,944 @@
-/* 화면 그리기. G를 읽기만 한다. */
+/* three.js 장면. G를 읽기만 한다(장면 객체는 화면 전용 상태). */
 
-var FONT_HEAVY = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif';
+var VIEW = { ready: false, tex: {}, fxMat: new Map(), hole: null, W: 0, H: 0 };
 
-var SURFACE_STYLE = {
-  tee: { tex: 'turf', strength: 0.5, key: 'fair' },
-  fairway: { tex: 'turf', strength: 0.5, key: 'fair' },
-  rough: { tex: 'grass', strength: 0.62, key: 'rough' },
-  green: { tex: 'turf', strength: 0.24, fixed: '#a2ee6c' },
-  bunker: { tex: 'sand', strength: 0.5, fixed: '#f3dca2' },
-  hard: { tex: 'soil', strength: 0.42, fixed: '#cdb777' },
-  soft: { tex: 'grass', strength: 0.6, fixed: '#4c8446' },
-};
-
-function surfaceColor(theme, type) {
-  const st = SURFACE_STYLE[type];
-  return st.fixed || THEMES[theme][st.key];
-}
-
-function renderGame(x, G) {
-  const W = G.view.W, H = G.view.H;
-  const hole = G.hole || HOLES[0];
-  const cam = { x: G.cam.x, y: G.cam.y, z: G.cam.z, cy: G.view.cy };
-  if (G.shake > 0) {
-    cam.x += Math.sin(G.time * 91) * G.shake * 0.6 / cam.z;
-    cam.y += Math.cos(G.time * 77) * G.shake * 0.6 / cam.z;
-  }
-  const ctx = { x, G, W, H, cam, hole, theme: THEMES[hole.theme], themeId: hole.theme,
-    sx: (wx) => (wx - cam.x) * cam.z + W / 2,
-    sy: (wy) => cam.cy - (wy - cam.y) * cam.z };
-  drawBackdrop(ctx);
-  drawDecor(ctx, 'back');
-  drawTerrain(ctx);
-  if (G.hole) drawSlopeArrows(ctx);
-  drawCupAndFlag(ctx);
-  if (G.hole) {
-    drawHazards(ctx);
-    drawMarkers(ctx);
-    drawGolferLayer(ctx);
-  }
-  drawDecor(ctx, 'front');
-  if (G.hole) {
-    drawTrail(ctx);
-    drawBall(ctx);
-  }
-  drawParticles(ctx);
-  drawLight(ctx);
-  if (G.hole) drawMinimap(ctx);
-  drawPopups(ctx);
-}
-
-function drawTiled(x, im, ox, y, W, scale) {
-  const w = im.width * scale, h = im.height * scale;
-  let px = -(((ox % w) + w) % w);
-  for (; px < W; px += w) x.drawImage(im, px, y, w + 1, h);
-}
-
-function drawBackdrop(c) {
-  const { x, W, H, G, cam } = c;
-  x.drawImage(skyCanvas(c.themeId, W, H), 0, 0);
-  const groundLine = c.sy(heightAt(c.hole, cam.x));
-  const n = ART.cloud.length;
-  for (let i = 0; i < 14; i++) {
-    const im = ART.cloud[i % n];
-    const depth = 0.03 + (i % 5) * 0.022;
-    const k = 0.4 + (i % 4) * 0.28;
-    const span = W + 700;
-    const raw = i * 317 + G.time * (2 + (i % 3) * 3) - cam.x * cam.z * depth;
-    const px = (((raw % span) + span) % span) - 340;
-    const py = 40 + ((i * 83) % Math.max(180, H * 0.34));
-    x.globalAlpha = 0.72 + (i % 3) * 0.13;
-    x.drawImage(im, px, py, im.width * k, im.height * k);
-  }
-  x.globalAlpha = 1;
-  const far = ridgeCanvas(c.themeId, 0);
-  const mid = ridgeCanvas(c.themeId, 1);
-  const horizon = Math.min(groundLine, H * 0.92);
-  const farScale = clamp(H / 780, 0.72, 1.2);
-  drawTiled(x, far, cam.x * cam.z * 0.05 + cam.x * 2, horizon - far.height * farScale + 66, W, farScale);
-  x.fillStyle = THEMES[c.themeId].far[1];
-  x.fillRect(0, horizon + 65, W, H);
-  const midScale = farScale * 1.08;
-  drawTiled(x, mid, cam.x * cam.z * 0.14 + cam.x * 7, horizon - mid.height * midScale + 86, W, midScale);
-  x.fillStyle = THEMES[c.themeId].mid[1];
-  x.fillRect(0, horizon + 85, W, H);
-}
-
-function drawDecor(c, layer) {
-  const { x, W, cam, hole, sx, sy } = c;
-  const list = holeDecor(hole)[layer];
-  const margin = 260;
-  const band = bandPx(cam.z);
-  for (const d of list) {
-    const px = sx(d.x);
-    if (px < -margin || px > W + margin) continue;
-    if (layer === 'front' && c.G.hole && Math.abs(d.x - c.G.golfer.x) < 6) continue; // 캐릭터와 공을 가리지 않게
-    const im = ART.scene[d.kind];
-    const h = d.h * cam.z, w = (h * im.width) / im.height;
-    const base = sy(heightAt(hole, d.x));
-    const y = layer === 'back' ? base - band.far + 5 : base + band.near * 0.72;
-    x.globalAlpha = layer === 'back' ? 0.74 : 1;
-    if (layer === 'back') {
-      x.fillStyle = 'rgba(16,48,28,.2)';
-      x.beginPath();
-      x.ellipse(px, y, w * 0.42, Math.max(2, h * 0.04), 0, 0, Math.PI * 2);
-      x.fill();
-    }
-    x.drawImage(im, px - w / 2, y - h, w, h);
-  }
-  x.globalAlpha = 1;
-}
-
-function bandPx(z) { return { far: clamp(z * 0.72, 7, 26), near: clamp(z * 0.5, 7, 18) }; }
-
-function patternFor(c, type, band) {
-  const st = SURFACE_STYLE[type];
-  const tile = surfaceTile(st.tex, surfaceColor(c.hole.theme, type), st.strength);
-  const pat = c.x.createPattern(tile, 'repeat');
-  const scale = clamp(c.cam.z / 26, 0.34, 1.1);
-  pat.setTransform(new DOMMatrix().translate(c.sx(0) % (256 * scale), band ? 0 : 0).scale(scale));
-  return pat;
-}
-
-function polyBand(x, xs, top, bottom, a, b) {
-  x.beginPath();
-  x.moveTo(xs[a], top[a]);
-  for (let i = a + 1; i <= b; i++) x.lineTo(xs[i], top[i]);
-  for (let i = b; i >= a; i--) x.lineTo(xs[i], bottom[i]);
-  x.closePath();
-}
-
-function drawTerrain(c) {
-  const { x, W, H, cam, hole, sx, sy } = c;
-  const step = 4;
-  const n = Math.ceil(W / step) + 2;
-  const xs = new Float32Array(n), ys = new Float32Array(n), far = new Float32Array(n), near = new Float32Array(n);
-  const types = new Array(n);
-  const band = bandPx(cam.z);
-  const left = cam.x - W / 2 / cam.z;
-  const dx = step / cam.z;
-  for (let i = 0; i < n; i++) {
-    const wx = left + i * dx;
-    xs[i] = i * step;
-    ys[i] = sy(heightAt(hole, wx));
-    far[i] = ys[i] - band.far;
-    near[i] = ys[i] + band.near;
-    types[i] = surfaceAt(hole, wx);
-  }
-  // 흙 단면
-  x.beginPath();
-  x.moveTo(0, H);
-  for (let i = 0; i < n; i++) x.lineTo(xs[i], near[i]);
-  x.lineTo(W, H);
-  x.closePath();
-  const soil = x.createPattern(surfaceTile('soil', '#a0683c', 0.55), 'repeat');
-  soil.setTransform(new DOMMatrix().translate(sx(0) % 200, 0).scale(0.8));
-  x.fillStyle = soil;
-  x.fill();
-  let minNear = H;
-  for (let i = 0; i < n; i++) if (near[i] < minNear) minNear = near[i];
-  const depth = x.createLinearGradient(0, minNear, 0, H);
-  depth.addColorStop(0, 'rgba(70,30,10,.08)');
-  depth.addColorStop(0.5, 'rgba(50,20,10,.5)');
-  depth.addColorStop(1, 'rgba(25,10,10,.82)');
-  x.fillStyle = depth;
-  x.fill();
-  drawStrata(x, xs, near, n, H, left);
-  // 지형 띠
-  let a = 0;
-  while (a < n) {
-    let b = a;
-    while (b + 1 < n && types[b + 1] === types[a]) b++;
-    const t = types[a];
-    const end = Math.min(b + 1, n - 1);
-    if (t !== 'water') {
-      polyBand(x, xs, far, near, a, end);
-      x.fillStyle = patternFor(c, t);
-      x.fill();
-      if (t === 'fairway' || t === 'green' || t === 'tee') drawStripes(c, xs, far, near, a, end, t);
-      if (t === 'bunker') {
-        polyBand(x, xs, far, near, a, end);
-        x.fillStyle = 'rgba(160,110,40,.13)';
-        x.fill();
-      }
-    }
-    a = b + 1;
-  }
-  // 앞면 그늘과 윗면 빛
-  x.beginPath();
-  x.moveTo(xs[0], near[0] - band.near * 0.34);
-  for (let i = 1; i < n; i++) x.lineTo(xs[i], near[i] - band.near * 0.34);
-  for (let i = n - 1; i >= 0; i--) x.lineTo(xs[i], near[i]);
-  x.closePath();
-  x.fillStyle = 'rgba(15,60,30,.3)';
-  x.fill();
-  x.lineJoin = 'round';
-  x.strokeStyle = 'rgba(255,255,220,.5)';
-  x.lineWidth = 2.2;
-  x.beginPath();
-  for (let i = 0; i < n; i++) {
-    if (types[i] === 'water') { x.moveTo(xs[i], far[i]); continue; }
-    if (i === 0) x.moveTo(xs[i], far[i]); else x.lineTo(xs[i], far[i]);
-  }
-  x.stroke();
-  drawFringe(c, xs, near, types, n, left, dx);
-  drawWater(c);
-}
-
-function drawStrata(x, xs, near, n, H, left) {
-  [[46, 'rgba(60,28,12,.2)'], [112, 'rgba(38,18,12,.26)']].forEach(([off, color], layer) => {
-    x.beginPath();
-    x.moveTo(0, H);
-    for (let i = 0; i < n; i += 2) {
-      x.lineTo(xs[i], near[i] + off + Math.sin(xs[i] * 0.021 + left * 0.8 + layer) * 8 + Math.sin(xs[i] * 0.067 + layer * 2) * 4);
-    }
-    x.lineTo(xs[n - 1], H);
-    x.closePath();
-    x.fillStyle = color;
-    x.fill();
+function loadTexture(src, opts) {
+  return loadImage3(src).then((im) => {
+    const t = new THREE.Texture(im);
+    t.encoding = opts && opts.linear ? THREE.LinearEncoding : THREE.sRGBEncoding;
+    t.wrapS = t.wrapT = opts && opts.clamp ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    t.needsUpdate = true;
+    return t;
   });
 }
 
-function drawStripes(c, xs, far, near, a, b, type) {
-  const { x, cam } = c;
-  const width = type === 'green' ? 2.4 : 7;
-  const wl = (i) => c.cam.x - c.W / 2 / cam.z + (xs[i] / cam.z);
-  let i = a;
-  while (i < b) {
-    const k = Math.floor(wl(i) / width);
-    let j = i;
-    while (j + 1 <= b && Math.floor(wl(j + 1) / width) === k) j++;
-    const stop = Math.min(j + 1, b);
-    if (k % 2 === 0) {
-      polyBand(x, xs, far, near, i, stop);
-      x.fillStyle = type === 'green' ? 'rgba(255,255,255,.1)' : 'rgba(255,255,210,.09)';
-      x.fill();
-    }
-    i = j + 1;
-  }
+async function initView(canvas) {
+  THREE.ColorManagement.legacyMode = false;
+  const R = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  R.outputEncoding = THREE.sRGBEncoding;
+  R.toneMapping = THREE.ACESFilmicToneMapping;
+  R.toneMappingExposure = 0.92;
+  R.shadowMap.enabled = true;
+  R.shadowMap.type = THREE.PCFSoftShadowMap;
+  VIEW.R = R;
+  VIEW.scene = new THREE.Scene();
+  VIEW.camera = new THREE.PerspectiveCamera(50, 1, 0.15, 4200);
+  VIEW.sun = new THREE.DirectionalLight(0xffffff, 2);
+  VIEW.sun.castShadow = true;
+  const shadowSize = window.innerWidth < 700 ? 1024 : 2048; // 휴대폰은 그림자 해상도를 낮춘다
+  VIEW.sun.shadow.mapSize.set(shadowSize, shadowSize);
+  VIEW.sun.shadow.bias = -0.0004;
+  VIEW.sun.shadow.normalBias = 0.05;
+  const s = VIEW.sun.shadow.camera;
+  s.left = -55; s.right = 55; s.top = 55; s.bottom = -55; s.near = 10; s.far = 500;
+  VIEW.scene.add(VIEW.sun, VIEW.sun.target);
+  VIEW.hemi = new THREE.HemisphereLight(0xcfe6ff, 0x6a7a3a, 0.5);
+  VIEW.scene.add(VIEW.hemi);
+  VIEW.scene.fog = new THREE.Fog(0xcfe0ee, 700, 3000);
+
+  const jobs = [];
+  for (const k in ASSETS.tex) jobs.push(loadTexture(ASSETS.tex[k], { linear: k === 'water' }).then((t) => { VIEW.tex[k] = t; }));
+  VIEW.sky = {};
+  for (const k in ASSETS.sky) jobs.push(loadTexture(ASSETS.sky[k], { clamp: false }).then((t) => { VIEW.sky[k] = t; }));
+  VIEW.treeTex = {};
+  for (const k in ASSETS.tree) jobs.push(loadTexture(ASSETS.tree[k], { clamp: true }).then((t) => { VIEW.treeTex[k] = t; }));
+  VIEW.fxTex = {};
+  for (const k in ASSETS.fx) jobs.push(loadTexture(ASSETS.fx[k], { clamp: true }).then((t) => { VIEW.fxTex[k] = t; }));
+  await Promise.all(jobs);
+  buildSharedObjects();
+  await loadModels();
+  renderIcons(R);
+  VIEW.scene.add(MODELS.rig.group);
+  VIEW.ready = true;
 }
 
-function drawFringe(c, xs, near, types, n, left, dx) {
-  const { x } = c;
-  x.fillStyle = 'rgba(34,110,44,.95)';
-  x.beginPath();
-  for (let i = 0; i < n; i++) {
-    if (types[i] === 'water' || types[i] === 'bunker') continue;
-    const wx = left + i * dx;
-    const seed = Math.abs(Math.sin(Math.floor(wx * 4) * 12.9898)) * 43758.5;
-    const f = seed - Math.floor(seed);
-    const h = 3 + f * 6;
-    x.moveTo(xs[i] - 2.3, near[i] - 1);
-    x.lineTo(xs[i] + (f - 0.5) * 3, near[i] + h);
-    x.lineTo(xs[i] + 2.3, near[i] - 1);
+function buildSharedObjects() {
+  const scene = VIEW.scene;
+  // 하늘(위쪽 반구만)
+  const skyGeo = new THREE.SphereGeometry(3400, 64, 20, 0, Math.PI * 2, 0, Math.PI / 2);
+  const uv = skyGeo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setY(i, (uv.getY(i) - 0.5) * 2);
+  VIEW.skyMesh = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, toneMapped: false, depthWrite: false }));
+  VIEW.skyMesh.renderOrder = -10;
+  scene.add(VIEW.skyMesh);
+
+  // 공
+  const ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.32 });
+  VIEW.ball = new THREE.Mesh(new THREE.SphereGeometry(0.0235, 18, 14), ballMat);
+  VIEW.ball.castShadow = true;
+  scene.add(VIEW.ball);
+  VIEW.ballBlob = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: 0x06180c, transparent: true, opacity: 0.4, depthWrite: false }));
+  VIEW.ballBlob.rotation.x = -Math.PI / 2;
+  scene.add(VIEW.ballBlob);
+  VIEW.ballGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: VIEW.fxTex.light, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  scene.add(VIEW.ballGlow);
+
+  // 궤적 띠
+  const N = 90;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 2 * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 2 * 4), 4));
+  const idx = [];
+  for (let i = 0; i < N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  geo.setIndex(idx);
+  VIEW.trail = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  VIEW.trail.frustumCulled = false;
+  VIEW.trailMax = N;
+  scene.add(VIEW.trail);
+
+  // 조준 점선과 착지 고리
+  VIEW.dots = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, fog: false }), 44);
+  VIEW.dots.frustumCulled = false;
+  scene.add(VIEW.dots);
+  VIEW.ring = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 44), new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+  VIEW.ring.rotation.x = -Math.PI / 2;
+  scene.add(VIEW.ring);
+  VIEW.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 40, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff0a0, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  scene.add(VIEW.beam);
+
+  // 입자
+  VIEW.sprites = [];
+  for (let i = 0; i < 180; i++) {
+    const sp = new THREE.Sprite();
+    sp.visible = false;
+    scene.add(sp);
+    VIEW.sprites.push(sp);
   }
-  x.fill();
+
+  // 그린 경사 화살표
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.5, -0.46); shape.lineTo(0, -0.46); shape.lineTo(0.55, 0); shape.lineTo(0, 0.46); shape.lineTo(-0.5, 0.46); shape.lineTo(0, 0);
+  shape.closePath();
+  VIEW.chevGeo = new THREE.ShapeGeometry(shape);
+  VIEW.chevGeo.rotateX(-Math.PI / 2);
 }
 
-function drawWater(c) {
-  const { x, G, hole, cam, sx, sy } = c;
-  const t = prepareHole(hole);
-  const band = bandPx(cam.z);
-  for (const p of t.level) {
-    const x0 = sx(p.from), x1 = sx(p.to);
-    if (x1 < -20 || x0 > c.W + 20) continue;
-    const yTop = sy(p.y);
-    const bottom = sy(p.y - 3.4) + band.near;
-    x.beginPath();
-    x.moveTo(x0, yTop - band.far);
-    const seg = Math.max(8, cam.z * 0.8);
-    for (let px = x0; px <= x1; px += seg) x.lineTo(px, yTop - band.far + Math.sin(px * 0.05 + G.time * 2.2) * 1.5);
-    x.lineTo(x1, yTop - band.far);
-    x.lineTo(x1, bottom);
-    x.lineTo(x0, bottom);
-    x.closePath();
-    const g = x.createLinearGradient(0, yTop - band.far, 0, bottom);
-    g.addColorStop(0, '#6fdcf0');
-    g.addColorStop(0.45, '#2c9fd8');
-    g.addColorStop(1, '#165f9e');
+function fxMaterial(tex, color, add) {
+  const key = tex + color + add;
+  let m = VIEW.fxMat.get(key);
+  if (!m) {
+    m = new THREE.SpriteMaterial({ map: VIEW.fxTex[tex], color, transparent: true, depthWrite: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending });
+    VIEW.fxMat.set(key, m);
+  }
+  return m;
+}
+
+/* ───────── 코스 ───────── */
+
+function disposeGroup(g) {
+  g.traverse((o) => {
+    if (o.geometry && o.geometry !== VIEW.chevGeo) o.geometry.dispose();
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if (m.map && m.map.isCanvasTexture) m.map.dispose(); m.dispose(); });
+  });
+}
+
+function courseBounds(hole) {
+  const last = hole.pts[hole.pts.length - 1][0];
+  return { x0: COURSE.minX, x1: last, z0: -COURSE.halfZ, z1: COURSE.halfZ };
+}
+
+function patternOf(x, tex, scale) {
+  const p = x.createPattern(tex.image, 'repeat');
+  p.setTransform(new DOMMatrix().scale(scale));
+  return p;
+}
+
+/** 코스를 위에서 그린 그림: 지형 무늬이자 미니맵 원본 */
+function paintCourse(hole) {
+  const B = courseBounds(hole);
+  const W = 4096;
+  const k = W / (B.x1 - B.x0);
+  const H = Math.round((B.z1 - B.z0) * k);
+  const c = mkCanvas(W, H);
+  const x = c.getContext('2d');
+  const T = THEMES[hole.theme];
+  const px = (wx) => (wx - B.x0) * k;
+  const pz = (wz) => (wz - B.z0) * k;
+  const rng = makeRng(hole.cup + 11);
+  x.fillStyle = T.rough;
+  x.fillRect(0, 0, W, H);
+  x.globalAlpha = 0.5;
+  x.globalCompositeOperation = 'overlay';
+  x.fillStyle = patternOf(x, VIEW.tex.grass, 0.55);
+  x.fillRect(0, 0, W, H);
+  x.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < 500; i++) {
+    const r = 40 + rng() * 170;
+    const gx = rng() * W, gy = rng() * H;
+    const g = x.createRadialGradient(gx, gy, 0, gx, gy, r);
+    const dark = rng() < 0.5;
+    g.addColorStop(0, dark ? 'rgba(15,50,20,.2)' : 'rgba(220,240,120,.13)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.globalAlpha = 1;
     x.fillStyle = g;
-    x.fill();
-    x.strokeStyle = 'rgba(255,255,255,.55)';
-    x.lineWidth = 1.6;
-    for (let k = 0; k < 7; k++) {
-      const u = (k * 0.141 + G.time * 0.05 * (1 + (k % 3))) % 1;
-      const wx = x0 + u * (x1 - x0);
-      const wy = yTop - band.far * (0.9 - k * 0.09) + k * 3;
-      const len = 12 + (k % 3) * 11;
-      x.beginPath();
-      x.moveTo(wx, wy);
-      x.quadraticCurveTo(wx + len / 2, wy - 2 + Math.sin(G.time * 3 + k), wx + len, wy);
-      x.stroke();
-    }
+    x.fillRect(gx - r, gy - r, r * 2, r * 2);
   }
-}
-
-function slopeColor(pct) { return pct < 1 ? '#ffffff' : pct < 2.2 ? '#ffe45c' : '#ff9a3d'; }
-
-/** 퍼터일 때 그린 위에 내리막 방향 화살표를 흐르게 그린다 */
-function drawSlopeArrows(c) {
-  const { x, G, hole, cam, sx, sy } = c;
-  if (G.club !== 'PT' || !(G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact')) return;
-  const g = hole.green;
-  const band = bandPx(cam.z);
-  const spacing = Math.max(2.4, 58 / cam.z);
-  const size = clamp(cam.z * 0.34, 5, 10);
-  const phase = (G.time * 0.55) % 1;
-  for (let wx = g.from + spacing / 2; wx < g.to; wx += spacing) {
-    const s = slopeAt(hole, wx);
-    const pct = Math.abs(s) * 100;
-    if (pct < 0.15) continue;
-    const dir = s > 0 ? -1 : 1;
-    const ax = wx + dir * phase * spacing * 0.6;
-    if (ax < g.from || ax > g.to) continue;
-    const px = sx(ax);
-    if (px < -20 || px > c.W + 20) continue;
-    const py = sy(heightAt(hole, ax)) - band.far * 0.42;
+  // 페어웨이
+  const fairPath = (grow) => {
+    x.beginPath();
+    const a = hole.fair[0], b = hole.fair[1];
+    const cx = (a + b) / 2, half = (b - a) / 2;
+    const edge = (wx, sign) => {
+      const u = (wx - cx) / half;
+      const end = Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(u), 10)));
+      return centerZ(hole, wx) + sign * (fairwayHalf(hole, wx) * end + grow * Math.min(1, end * 3));
+    };
+    for (let wx = a; wx <= b; wx += 2) x.lineTo(px(wx), pz(edge(wx, -1)));
+    for (let wx = b; wx >= a; wx -= 2) x.lineTo(px(wx), pz(edge(wx, 1)));
+    x.closePath();
+  };
+  fairPath(2.4);
+  x.fillStyle = hexShade(T.fair, -0.16);
+  x.fill();
+  x.save();
+  fairPath(0);
+  x.fillStyle = T.fair;
+  x.fill();
+  x.clip();
+  x.globalAlpha = 0.5;
+  x.globalCompositeOperation = 'overlay';
+  x.fillStyle = patternOf(x, VIEW.tex.turf, 0.4);
+  x.fillRect(0, 0, W, H);
+  x.globalCompositeOperation = 'source-over';
+  // 깎은 잔디 무늬(비스듬한 격자)
+  x.fillStyle = 'rgba(255,255,210,.12)';
+  const stripe = 7 * k;
+  for (let i = -H; i < W + H; i += stripe * 2) {
+    x.globalAlpha = 1;
     x.save();
-    x.translate(px, py);
-    x.rotate(Math.atan(-s * 6) * (dir > 0 ? 1 : 1));
-    x.scale(dir, 1);
-    x.globalAlpha = 0.5 + 0.45 * Math.sin(phase * Math.PI);
-    x.fillStyle = slopeColor(pct);
-    x.strokeStyle = 'rgba(20,60,30,.65)';
-    x.lineWidth = 1.2;
-    for (let k = 0; k < 2; k++) {
-      const ox = k * size * 0.95 - size * 0.5;
-      x.beginPath();
-      x.moveTo(ox - size * 0.5, -size * 0.62);
-      x.lineTo(ox, -size * 0.62);
-      x.lineTo(ox + size * 0.55, 0);
-      x.lineTo(ox, size * 0.62);
-      x.lineTo(ox - size * 0.5, size * 0.62);
-      x.lineTo(ox + size * 0.05, 0);
-      x.closePath();
-      x.fill();
-      x.stroke();
-    }
+    x.translate(i, 0);
+    x.transform(1, 0, 0.8, 1, 0, 0);
+    x.fillRect(0, 0, stripe, H);
     x.restore();
   }
+  x.fillStyle = 'rgba(0,50,10,.08)';
+  for (let i = -H; i < W + H; i += stripe * 2) {
+    x.save();
+    x.translate(i, 0);
+    x.transform(1, 0, -0.8, 1, 0, 0);
+    x.fillRect(0, 0, stripe, H);
+    x.restore();
+  }
+  x.restore();
   x.globalAlpha = 1;
-}
-
-function drawCupAndFlag(c) {
-  const { x, G, hole, cam, sx, sy } = c;
-  const px = sx(hole.cup), py = sy(heightAt(hole, hole.cup));
-  if (px < -200 || px > c.W + 200) return;
-  const z = cam.z;
-  const rw = clamp(z * 0.42, 5, 16), rh = rw * 0.36;
-  x.fillStyle = '#20261f';
-  x.beginPath();
-  x.ellipse(px, py, rw, rh, 0, 0, Math.PI * 2);
-  x.fill();
-  x.strokeStyle = 'rgba(255,255,255,.75)';
-  x.lineWidth = 1.5;
-  x.beginPath();
-  x.ellipse(px, py, rw, rh, 0, 0, Math.PI);
-  x.stroke();
-  const poleH = clamp(z * 5.4, 62, 150);
-  x.fillStyle = 'rgba(10,40,20,.25)';
-  x.beginPath();
-  x.ellipse(px + poleH * 0.22, py + 1, poleH * 0.22, 2.4, 0, 0, Math.PI * 2);
-  x.fill();
-  const pg = x.createLinearGradient(px - 2, 0, px + 2, 0);
-  pg.addColorStop(0, '#c9ced4');
-  pg.addColorStop(1, '#ffffff');
-  x.fillStyle = pg;
-  x.fillRect(px - 1.6, py - poleH, 3.2, poleH);
-  const dir = G.wind >= 0 ? 1 : -1;
-  const fw = poleH * 0.46, fh = poleH * 0.27;
-  x.beginPath();
-  x.moveTo(px, py - poleH);
-  const N = 12;
-  const wave = (u) => Math.sin(u * 5.5 - G.time * (5 + Math.abs(G.wind))) * 3.4 * u;
-  for (let i = 1; i <= N; i++) {
-    const u = i / N;
-    x.lineTo(px + dir * fw * u, py - poleH + (fh / 2) * u + wave(u));
+  const S = holeShapes(hole);
+  if (hole.layout) {
+    for (const p of hole.layout.patches) {
+      const r = p.r * k;
+      const g = x.createRadialGradient(px(p.x), pz(p.z), r * 0.55, px(p.x), pz(p.z), r);
+      const col = p.type === 'hard' ? '205,183,119' : '70,120,60';
+      g.addColorStop(0, `rgba(${col},${p.type === 'hard' ? 0.7 : 0.42})`);
+      g.addColorStop(1, `rgba(${col},0)`);
+      x.fillStyle = g;
+      x.fillRect(px(p.x) - r, pz(p.z) - r, r * 2, r * 2);
+    }
   }
-  for (let i = N; i >= 0; i--) {
-    const u = i / N;
-    x.lineTo(px + dir * fw * u, py - poleH + fh - (fh / 2) * u + wave(u));
-  }
-  x.closePath();
-  const fg = x.createLinearGradient(px, 0, px + dir * fw, 0);
-  fg.addColorStop(0, '#ff5a4d');
-  fg.addColorStop(1, '#d92f3f');
-  x.fillStyle = fg;
-  x.fill();
-  x.fillStyle = '#ffd34d';
-  x.beginPath();
-  x.arc(px, py - poleH, 3.6, 0, Math.PI * 2);
-  x.fill();
-}
-
-/** 공이 실제로 부딪히는 장애물 */
-function drawHazards(c) {
-  const { x, G, cam, hole, sx, sy } = c;
-  if (!hole.layout) return;
-  const margin = 240;
-  for (const t of hole.layout.trees) {
-    const px = sx(t.x);
-    const im = ART.scene[t.kind];
-    const h = t.h * cam.z;
-    const w = (h * im.width) / im.height;
-    if (px < -w || px > c.W + w) continue;
-    const y = sy(heightAt(hole, t.x)) + 3;
-    x.fillStyle = 'rgba(14,44,24,.32)';
+  const ell = (e, grow, fill) => {
     x.beginPath();
-    x.ellipse(px, y - 1, w * 0.52, Math.max(3, h * 0.04), 0, 0, Math.PI * 2);
+    x.ellipse(px(e.cx), pz(e.cz), (e.rx + grow) * k, (e.rz + grow) * k, 0, 0, Math.PI * 2);
+    x.fillStyle = fill;
     x.fill();
-    const shaking = G.treeShake && G.treeShake.x === t.x;
-    const sway = shaking ? Math.sin(G.time * 34) * 0.05 * (G.treeShake.t / G.treeShake.max) : 0;
+  };
+  for (const e of S.ponds) {
+    ell(e, 2.5, hexShade(T.rough, -0.2));
+    ell(e, 0, '#0e4a62');
+  }
+  for (const e of S.bunkers) {
+    ell(e, 1.6, hexShade(T.rough, -0.25));
+    ell(e, 0, '#efdca4');
     x.save();
-    x.translate(px, y);
-    x.rotate(sway);
-    x.drawImage(im, -w / 2, -h, w, h);
-    x.restore();
-  }
-  for (const rock of hole.layout.rocks) {
-    const px = sx(rock.x);
-    if (px < -margin || px > c.W + margin) continue;
-    const im = ART.scene[rock.kind];
-    const h = rock.r * 1.75 * cam.z;
-    const w = (h * im.width) / im.height;
-    const y = sy(heightAt(hole, rock.x)) + 3;
-    x.fillStyle = 'rgba(14,44,24,.3)';
     x.beginPath();
-    x.ellipse(px, y - 1, w * 0.55, Math.max(2.5, h * 0.12), 0, 0, Math.PI * 2);
-    x.fill();
-    x.drawImage(im, px - w / 2, y - h, w, h);
+    x.ellipse(px(e.cx), pz(e.cz), e.rx * k, e.rz * k, 0, 0, Math.PI * 2);
+    x.clip();
+    x.globalAlpha = 0.5;
+    x.globalCompositeOperation = 'overlay';
+    x.fillStyle = patternOf(x, VIEW.tex.sand, 0.3);
+    x.fillRect(0, 0, W, H);
+    x.restore();
+    x.globalAlpha = 1;
   }
-}
-
-function drawMarkers(c) {
-  const { x, G, hole, sx, sy } = c;
-  if (G.phase !== 'aim' && G.phase !== 'power' && G.phase !== 'impact') return;
-  if (G.markerX == null || G.club === 'PT') return;
-  const px = sx(G.markerX);
-  if (px < -40 || px > c.W + 40) return;
-  const py = sy(heightAt(hole, G.markerX));
-  const beam = x.createLinearGradient(0, py - 150, 0, py);
-  beam.addColorStop(0, 'rgba(255,240,130,0)');
-  beam.addColorStop(1, 'rgba(255,240,130,.58)');
-  x.fillStyle = beam;
-  x.fillRect(px - 9, py - 150, 18, 150);
-  x.strokeStyle = '#fff0a0';
-  x.lineWidth = 2.4;
+  ell(S.green, 2.6, hexShade(T.fair, 0.1));
+  ell(S.green, 0, T.green);
+  x.save();
   x.beginPath();
-  x.ellipse(px, py, 22, 7, 0, 0, Math.PI * 2);
-  x.stroke();
-  x.font = '800 13px ' + FONT_HEAVY;
-  x.textAlign = 'center';
-  x.lineWidth = 3.5;
-  x.strokeStyle = 'rgba(20,40,70,.8)';
-  const label = currentPassive().kind === 'windMarker' ? 'MAX·바람' : 'MAX';
-  x.strokeText(label, px, py - 22);
-  x.fillStyle = '#fff6c0';
-  x.fillText(label, px, py - 22);
-}
-
-function drawGolferLayer(c) {
-  const { x, G, hole, cam, sx, sy } = c;
-  const gf = G.golfer;
-  const s = cam.z * RIG.spriteToWorld;
-  const px = sx(gf.x);
-  const margin = 260 * s;
-  if (px < -margin || px > c.W + margin) return;
-  const py = sy(heightAt(hole, gf.x));
-  x.fillStyle = 'rgba(10,40,20,.3)';
+  x.ellipse(px(S.green.cx), pz(S.green.cz), S.green.rx * k, S.green.rz * k, 0, 0, Math.PI * 2);
+  x.clip();
+  x.fillStyle = 'rgba(255,255,255,.075)';
+  const gs = 2.2 * k;
+  for (let i = 0; i < W; i += gs * 2) x.fillRect(i, 0, gs, H);
+  x.fillStyle = 'rgba(0,40,0,.04)';
+  for (let i = 0; i < H; i += gs * 2) x.fillRect(0, i, W, gs);
+  x.restore();
+  // 티
+  x.fillStyle = hexShade(T.fair, 0.12);
   x.beginPath();
-  x.ellipse(px, py + 2, 58 * s, 11 * s, 0, 0, Math.PI * 2);
+  x.roundRect(px(hole.tee[0]), pz(-6), (hole.tee[1] - hole.tee[0]) * k, 12 * k, 2 * k);
   x.fill();
-  const club = ITEMS.club.find((it) => it.id === G.equip.club);
-  drawGolfer(x, px, py + 3, {
-    charId: G.equip.char, topId: G.equip.top, shoesId: G.equip.shoes, hatId: G.equip.hat,
-    clubType: G.swingClub || G.club, clubColor: club.color, phi: gf.phi, expr: gf.expr, pose: gf.pose, scale: s, bob: gf.bob,
+  return { canvas: c, B, k };
+}
+
+function hexShade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.round(clamp(amt > 0 ? v + (255 - v) * amt : v * (1 + amt), 0, 255));
+  return `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+
+function terrainMesh(hole, paint) {
+  const B = paint.B;
+  const step = 2;
+  const nx = Math.floor((B.x1 - B.x0) / step) + 1;
+  const nz = Math.floor((B.z1 - B.z0) / step) + 1;
+  const pos = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2);
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const k = i * nz + j;
+      const x = B.x0 + i * step, z = B.z0 + j * step;
+      pos[k * 3] = x; pos[k * 3 + 1] = heightAt(hole, x, z); pos[k * 3 + 2] = z;
+      uv[k * 2] = (x - B.x0) / (B.x1 - B.x0);
+      uv[k * 2 + 1] = 1 - (z - B.z0) / (B.z1 - B.z0);
+    }
+  }
+  const idx = new Uint32Array((nx - 1) * (nz - 1) * 6);
+  let n = 0;
+  for (let i = 0; i < nx - 1; i++) {
+    for (let j = 0; j < nz - 1; j++) {
+      const a = i * nz + j, b = a + 1, c = a + nz, d = c + 1;
+      idx[n++] = a; idx[n++] = b; idx[n++] = c; idx[n++] = b; idx[n++] = d; idx[n++] = c;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  const tex = new THREE.CanvasTexture(paint.canvas);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.anisotropy = VIEW.R.capabilities.getMaxAnisotropy();
+  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.96, metalness: 0, envMapIntensity: 0.5 });
+  const detail = VIEW.tex.turf;
+  mat.onBeforeCompile = (s) => {
+    s.uniforms.uDetail = { value: detail };
+    s.vertexShader = 'varying vec3 vW;\n' + s.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    s.fragmentShader = 'varying vec3 vW;\nuniform sampler2D uDetail;\n' + s.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      float dist = length(vW - cameraPosition);
+      float near = 1.0 - smoothstep(25.0, 140.0, dist);
+      vec3 d1 = texture2D(uDetail, vW.xz * 0.7).rgb;
+      vec3 d2 = texture2D(uDetail, vW.xz * 0.11).rgb;
+      float lum = dot(d1, vec3(.33)) * 2.3;
+      float lum2 = dot(d2, vec3(.33)) * 2.3;
+      diffuseColor.rgb *= mix(1.0, lum, 0.55 * near) * mix(1.0, lum2, 0.35);`);
+  };
+  const m = new THREE.Mesh(geo, mat);
+  m.receiveShadow = true;
+  return m;
+}
+
+/** 코스 밖으로 이어지는 낮은 언덕 */
+function outerLand(hole) {
+  const B = courseBounds(hole);
+  const span = 3600, n = 90;
+  const geo = new THREE.PlaneGeometry(span, span, n, n);
+  geo.rotateX(-Math.PI / 2);
+  const cx = (B.x0 + B.x1) / 2;
+  geo.translate(cx, 0, 0);
+  const pos = geo.attributes.position;
+  const far = new THREE.Color(THEMES[hole.theme].far), near = new THREE.Color(THEMES[hole.theme].rough);
+  const col = new Float32Array(pos.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const qx = clamp(x, B.x0, B.x1), qz = clamp(z, B.z0, B.z1);
+    const d = Math.hypot(x - qx, z - qz);
+    const hills = (Math.sin(x * 0.006 + 1.3) * Math.cos(z * 0.0043) + 0.55 * Math.sin(x * 0.013 + z * 0.009) + 0.8) * 13;
+    pos.setY(i, d <= 1 ? heightAt(hole, qx, qz) - 6 : heightAt(hole, qx, qz) - 0.6 + smooth(d / 520) * hills);
+    c.copy(near).lerp(far, smooth(d / 300));
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, envMapIntensity: 0.4 }));
+  return m;
+}
+
+/** 겹친 판의 뒷면이 까맣게 되지 않도록 법선을 뒤집지 않는다 */
+function keepNormals(mat) {
+  mat.onBeforeCompile = (s) => {
+    s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('gl_FrontFacing ? 1.0 : - 1.0', '1.0'));
+  };
+  return mat;
+}
+
+function treeGeometry(info, variant) {
+  const [u0, v0, u1, v1] = info.bbox;
+  const cw = (u1 - u0) / info.cols;
+  const a = u0 + cw * variant, b = a + cw;
+  const aspect = (cw / (v1 - v0));
+  const hw = aspect / 2;
+  const mk = (ang) => {
+    const c = Math.cos(ang) * hw, s = Math.sin(ang) * hw;
+    return {
+      p: [-c, 0, -s, c, 0, s, c, 1, s, -c, 1, -s],
+      u: [a, 1 - v1, b, 1 - v1, b, 1 - v0, a, 1 - v0],
+    };
+  };
+  const planes = [mk(0.4), mk(0.4 + Math.PI / 2), mk(0.4 + Math.PI / 4)];
+  const pos = [], uv = [], idx = [], nor = [];
+  planes.forEach((pl, i) => {
+    pos.push(...pl.p);
+    uv.push(...pl.u);
+    for (let k = 0; k < 4; k++) nor.push(0.2, 0.95, 0.2);
+    const o = i * 4;
+    idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+function buildTrees(hole, group) {
+  const T = THEMES[hole.theme];
+  const byKey = new Map();
+  hole.layout.trees.forEach((t) => {
+    const key = t.kind + ':' + t.variant;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(t);
+  });
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const col = new THREE.Color();
+  VIEW.treeLook = [];
+  byKey.forEach((list, key) => {
+    const [kind, variant] = key.split(':');
+    const info = TREE_KINDS[kind];
+    const tex = VIEW.treeTex[info.tex];
+    const mat = keepNormals(new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.38, side: THREE.DoubleSide, roughness: 0.9, envMapIntensity: 0.55, alphaToCoverage: true }));
+    const mesh = new THREE.InstancedMesh(treeGeometry(info, +variant), mat, list.length);
+    mesh.castShadow = true;
+    mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.42 });
+    mesh.frustumCulled = false;
+    list.forEach((t, i) => {
+      P.set(t.x, heightAt(hole, t.x, t.z) - 0.1, t.z);
+      Q.setFromAxisAngle(up, t.turn);
+      S.setScalar(t.h);
+      M.compose(P, Q, S);
+      mesh.setMatrixAt(i, M);
+      const v = 0.88 + t.tint * 0.26;
+      col.setRGB(T.tint[0] * v, T.tint[1] * v, T.tint[2] * v);
+      mesh.setColorAt(i, col);
+      VIEW.treeLook.push({ tree: t, mesh, index: i });
+    });
+    group.add(mesh);
   });
 }
 
-function trailColor(G) {
-  if (SPECIAL_SHOTS[G.shotStyle]) return SPECIAL_SHOTS[G.shotStyle].trail;
-  if (G.shotStyle === 'perfect') return ['255,214,84', '255,120,50'];
-  return ['255,255,255', '180,225,255'];
+function buildRocks(hole, group) {
+  const rocks = hole.layout.rocks;
+  if (!rocks.length) return;
+  const geo = new THREE.IcosahedronGeometry(1, 1);
+  const p = geo.attributes.position;
+  const rng = makeRng(77);
+  for (let i = 0; i < p.count; i++) {
+    const k = 0.8 + 0.34 * Math.abs(Math.sin(p.getX(i) * 7.1 + p.getY(i) * 3.3 + p.getZ(i) * 5.7));
+    p.setXYZ(i, p.getX(i) * k, p.getY(i) * k, p.getZ(i) * k);
+  }
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x9a9c9b, roughness: 0.92, map: VIEW.tex.soil, flatShading: true });
+  const mesh = new THREE.InstancedMesh(geo, mat, rocks.length);
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.frustumCulled = false;
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  rocks.forEach((r, i) => {
+    P.set(r.x, heightAt(hole, r.x, r.z) + r.r * 0.3, r.z);
+    Q.setFromAxisAngle(up, r.turn);
+    S.set(r.r * 1.05, r.r * 0.9, r.r);
+    M.compose(P, Q, S);
+    mesh.setMatrixAt(i, M);
+  });
+  group.add(mesh);
+  rng();
 }
 
-function drawTrail(c) {
-  const { x, G, sx, sy, cam } = c;
-  const T = G.trail;
-  if (T.length < 2) return;
-  const cols = trailColor(G);
-  x.lineCap = 'round';
-  const width = clamp(cam.z * 0.34, 3, 9);
-  for (let i = 1; i < T.length; i++) {
-    const u = i / T.length;
-    x.strokeStyle = 'rgba(' + (u > 0.5 ? cols[0] : cols[1]) + ',' + (u * 0.72 * G.trailFade).toFixed(3) + ')';
-    x.lineWidth = width * (0.28 + u * 0.72);
+/** 풀 포기: 가까이서 땅이 납작해 보이지 않게 한다 */
+function buildTufts(hole, group) {
+  const c = mkCanvas(128, 128);
+  const x = c.getContext('2d');
+  const r = makeRng(5);
+  for (let i = 0; i < 46; i++) {
+    const bx = 8 + r() * 112, top = 8 + r() * 80;
+    x.strokeStyle = `rgba(${90 + r() * 50},${150 + r() * 60},${50 + r() * 30},1)`;
+    x.lineWidth = 3 + r() * 3;
     x.beginPath();
-    x.moveTo(sx(T[i - 1].x), sy(T[i - 1].y));
-    x.lineTo(sx(T[i].x), sy(T[i].y));
+    x.moveTo(bx, 128);
+    x.quadraticCurveTo(bx + (r() - 0.5) * 18, 70, bx + (r() - 0.5) * 34, top);
     x.stroke();
   }
-  x.lineCap = 'butt';
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  const geo = new THREE.PlaneGeometry(1, 1);
+  geo.translate(0, 0.5, 0);
+  const merged = new THREE.BufferGeometry();
+  const pa = [], ua = [], ia = [], na = [];
+  [0.6, 0.6 + Math.PI / 2].forEach((a, j) => {
+    const cs = Math.cos(a) * 0.5, sn = Math.sin(a) * 0.5;
+    pa.push(-cs, 0, -sn, cs, 0, sn, cs, 1, sn, -cs, 1, -sn);
+    ua.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let k = 0; k < 4; k++) na.push(0, 1, 0);
+    const o = j * 4;
+    ia.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  });
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(pa, 3));
+  merged.setAttribute('uv', new THREE.Float32BufferAttribute(ua, 2));
+  merged.setAttribute('normal', new THREE.Float32BufferAttribute(na, 3));
+  merged.setIndex(ia);
+  geo.dispose();
+  const count = 1900;
+  const mesh = new THREE.InstancedMesh(merged, keepNormals(new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1, envMapIntensity: 0.3 })), count);
+  mesh.frustumCulled = false;
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const col = new THREE.Color();
+  const tint = new THREE.Color(THEMES[hole.theme].rough);
+  const rng = makeRng(hole.cup + 3);
+  const last = hole.end;
+  let n = 0;
+  for (let tries = 0; tries < count * 12 && n < count; tries++) {
+    const wx = -8 + rng() * (last + 8);
+    const wz = centerZ(hole, wx) + (rng() * 2 - 1) * (fairwayHalf(hole, wx) + 40);
+    if (surfaceAt(hole, wx, wz) !== 'rough') continue;
+    const h = 0.16 + rng() * 0.26;
+    P.set(wx, heightAt(hole, wx, wz) - 0.02, wz);
+    Q.setFromAxisAngle(up, rng() * 6.28);
+    S.set(h * 1.5, h, h * 1.5);
+    M.compose(P, Q, S);
+    mesh.setMatrixAt(n, M);
+    col.copy(tint).lerp(new THREE.Color(0xdff0a0), 0.12 + rng() * 0.22);
+    mesh.setColorAt(n, col);
+    n++;
+  }
+  mesh.count = n;
+  group.add(mesh);
 }
 
-function drawBall(c) {
-  const { x, G, hole, cam, sx, sy } = c;
-  const b = G.ball;
-  if (!b || b.holed) return;
-  const r = clamp(cam.z * 0.2, 4, 8);
-  const px = sx(b.x), py = sy(b.y);
-  const gy = sy(heightAt(hole, b.x));
-  const alt = Math.max(0, gy - py);
-  x.fillStyle = 'rgba(10,35,20,' + (0.34 * clamp(1 - alt / 500, 0.2, 1)).toFixed(3) + ')';
-  x.beginPath();
-  x.ellipse(px, gy + 1, r * (1 + alt * 0.003), r * 0.32, 0, 0, Math.PI * 2);
-  x.fill();
-  if (G.shotStyle && b.mode !== 'stop') {
-    const glow = tintedFx('light', SPECIAL_SHOTS[G.shotStyle] ? SPECIAL_SHOTS[G.shotStyle].glow : '#ffd25a');
-    x.globalCompositeOperation = 'lighter';
-    x.drawImage(glow, px - r * 5, py - r - r * 4.3, r * 10, r * 10);
-    x.globalCompositeOperation = 'source-over';
-  }
-  x.save();
-  x.translate(px, py - r);
-  x.rotate(b.rot);
-  x.drawImage(ballSprite(), -r, -r, r * 2, r * 2);
-  x.restore();
+function buildFlag(hole, group) {
+  const S = holeShapes(hole);
+  const y = heightAt(hole, hole.cup, S.cupZ);
+  const f = new THREE.Group();
+  f.position.set(hole.cup, y, S.cupZ);
+  const hole2 = new THREE.Mesh(new THREE.CircleGeometry(0.17, 28), new THREE.MeshBasicMaterial({ color: 0x0b0f0a }));
+  hole2.rotation.x = -Math.PI / 2;
+  hole2.position.y = 0.012;
+  f.add(hole2);
+  const rim = new THREE.Mesh(new THREE.RingGeometry(0.165, 0.19, 28), new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }));
+  rim.rotation.x = -Math.PI / 2;
+  rim.position.y = 0.014;
+  f.add(rim);
+  const H = 3.2;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, H, 8), new THREE.MeshStandardMaterial({ color: 0xf6f6f6, roughness: 0.4 }));
+  pole.position.y = H / 2;
+  pole.castShadow = true;
+  f.add(pole);
+  const cloth = new THREE.PlaneGeometry(1.15, 0.72, 14, 4);
+  cloth.translate(0.575, 0, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xe8362e, side: THREE.DoubleSide, roughness: 0.65 });
+  const flag = new THREE.Mesh(cloth, mat);
+  flag.position.y = H - 0.38;
+  flag.castShadow = true;
+  f.add(flag);
+  VIEW.flag = flag;
+  VIEW.flagBase = Float32Array.from(cloth.attributes.position.array);
+  group.add(f);
+  // 티 마커
+  [-3.4, 3.4].forEach((z) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshStandardMaterial({ color: 0xe8362e, roughness: 0.35 }));
+    m.position.set(hole.tee[1] - 6, heightAt(hole, hole.tee[1] - 6, z) + 0.05, z);
+    m.castShadow = true;
+    group.add(m);
+  });
 }
 
-function drawParticles(c) {
-  const { x, G, cam, sx, sy } = c;
-  for (const p of G.fx) {
-    const u = p.life / p.max;
-    const size = p.size * (p.grow ? 1 + (1 - u) * p.grow : 1) * (p.screen ? 1 : cam.z / 22);
-    const im = tintedFx(p.tex, p.color);
-    x.globalAlpha = clamp(u * (p.alpha || 1), 0, 1);
-    x.globalCompositeOperation = p.add ? 'lighter' : 'source-over';
-    x.save();
-    x.translate(sx(p.x), sy(p.y));
-    x.rotate(p.rot);
-    x.drawImage(im, -size / 2, -size / 2, size, size);
-    x.restore();
-  }
-  x.globalAlpha = 1;
-  x.globalCompositeOperation = 'source-over';
-}
-
-function drawLight(c) {
-  const { x, W, H, G, theme } = c;
-  const sunX = theme.sun[0] * W, sunY = theme.sun[1] * H;
-  x.save();
-  x.globalCompositeOperation = 'lighter';
-  x.translate(sunX, sunY);
-  for (let i = 0; i < 4; i++) {
-    const a = 0.5 + i * 0.5 + Math.sin(G.time * 0.13 + i) * 0.05;
-    x.save();
-    x.rotate(a);
-    const len = Math.hypot(W, H);
-    const g = x.createLinearGradient(0, 0, 0, len);
-    g.addColorStop(0, 'rgba(255,245,200,.042)');
-    g.addColorStop(1, 'rgba(255,245,200,0)');
-    x.fillStyle = g;
-    x.beginPath();
-    x.moveTo(0, 0);
-    x.lineTo(-44 - i * 16, len);
-    x.lineTo(44 + i * 16, len);
-    x.closePath();
-    x.fill();
-    x.restore();
-  }
-  x.restore();
-  x.globalCompositeOperation = 'soft-light';
-  x.globalAlpha = 0.22;
-  x.fillStyle = theme.grade;
-  x.fillRect(0, 0, W, H);
-  x.globalAlpha = 1;
-  x.globalCompositeOperation = 'source-over';
-  x.drawImage(vignetteCanvas(W, H), 0, 0);
-  if (G.flash > 0) {
-    x.fillStyle = 'rgba(255,250,215,' + clamp(G.flash, 0, 0.8).toFixed(3) + ')';
-    x.fillRect(0, 0, W, H);
-  }
-}
-
-function drawMinimap(c) {
-  const { x, W, G, hole } = c;
-  if (G.phase === 'title') return;
-  const mw = Math.min(W - 24, 620), mh = 42;
-  const mx = (W - mw) / 2, my = G.view.miniY;
-  x.save();
-  x.beginPath();
-  x.roundRect(mx, my, mw, mh, 11);
-  x.fillStyle = 'rgba(14,34,64,.52)';
-  x.fill();
-  x.strokeStyle = 'rgba(255,255,255,.3)';
-  x.lineWidth = 1;
-  x.stroke();
-  x.clip();
-  const x0 = -14, x1 = hole.end + 12;
+function buildWater(hole, group) {
+  VIEW.waterTex = null;
   const t = prepareHole(hole);
-  let lo = 1e9, hi = -1e9;
-  for (let i = 0; i <= 120; i++) {
-    const h = heightAt(hole, lerp(x0, x1, i / 120));
-    if (h < lo) lo = h;
-    if (h > hi) hi = h;
+  if (!t.level.length) return;
+  const nor = VIEW.tex.water.clone();
+  nor.needsUpdate = true;
+  nor.repeat.set(26, 26);
+  VIEW.waterTex = nor;
+  t.level.forEach((p) => {
+    const geo = new THREE.CircleGeometry(1, 64);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2b86b4, roughness: 0.1, metalness: 0.15, normalMap: nor, normalScale: new THREE.Vector2(0.5, 0.5), transparent: true, opacity: 0.9, envMapIntensity: 1.5 });
+    const m = new THREE.Mesh(geo, mat);
+    m.scale.set(p.rx + 0.4, 1, p.rz + 0.4);
+    m.position.set(p.cx, p.y, p.cz);
+    m.receiveShadow = true;
+    group.add(m);
+  });
+}
+
+function buildGreenArrows(hole, group) {
+  const S = holeShapes(hole);
+  const pts = [];
+  for (let x = S.green.cx - S.green.rx; x <= S.green.cx + S.green.rx; x += 3.2) {
+    for (let z = S.green.cz - S.green.rz; z <= S.green.cz + S.green.rz; z += 3.2) {
+      if (ellipseR(S.green, x, z) < 0.94) pts.push([x, z]);
+    }
   }
-  const px = (wx) => mx + ((wx - x0) / (x1 - x0)) * mw;
-  const py = (wy) => my + mh - 7 - ((wy - lo) / Math.max(4, hi - lo)) * (mh - 20);
-  const COLORS = { tee: '#c7f58c', fairway: '#8fe35e', rough: '#459a43', bunker: '#f2dc9b', green: '#c8ff8a', water: '#46b8ec', hard: '#d3bf80', soft: '#4c8446' };
-  for (let i = 0; i < mw; i += 2) {
-    const wx = x0 + (i / mw) * (x1 - x0);
-    const ty = surfaceAt(hole, wx);
-    const yy = ty === 'water' ? py(t.level.length ? t.level[0].y : heightAt(hole, wx)) : py(heightAt(hole, wx));
-    x.fillStyle = COLORS[ty];
-    x.fillRect(mx + i, yy, 2, my + mh - yy);
+  const mesh = new THREE.InstancedMesh(VIEW.chevGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, fog: false }), pts.length);
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  mesh.userData.pts = pts;
+  group.add(mesh);
+  VIEW.arrows = mesh;
+}
+
+function applyTheme(hole) {
+  const T = THEMES[hole.theme];
+  const R = VIEW.R, scene = VIEW.scene;
+  const tex = VIEW.sky[T.sky];
+  VIEW.skyMesh.material.map = tex;
+  VIEW.skyMesh.material.needsUpdate = true;
+  const sunU = { spring: 0.6, autumn: 0.6, beach: 0.7, dusk: 0.6 }[T.sky];
+  const skyAng = Math.PI - 2 * Math.PI * sunU;
+  const az = (T.sunAz * Math.PI) / 180, el = (T.sunEl * Math.PI) / 180;
+  VIEW.skyMesh.rotation.y = skyAng - az;
+  VIEW.sunDir = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el));
+  VIEW.sun.color.set(T.sun);
+  VIEW.sun.intensity = T.sunI;
+  VIEW.hemi.intensity = T.hemi;
+  scene.fog.color.set(T.fog);
+  if (VIEW.envKey !== T.sky) {
+    VIEW.envKey = T.sky;
+    const sub = new THREE.Scene();
+    const dome = VIEW.skyMesh.clone();
+    dome.material = VIEW.skyMesh.material.clone();
+    dome.scale.setScalar(0.1);
+    sub.add(dome);
+    const floor = new THREE.Mesh(new THREE.SphereGeometry(300, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshBasicMaterial({ color: T.far, side: THREE.BackSide }));
+    sub.add(floor);
+    if (!VIEW.pmrem) VIEW.pmrem = new THREE.PMREMGenerator(R);
+    if (VIEW.envRT) VIEW.envRT.dispose();
+    VIEW.envRT = VIEW.pmrem.fromScene(sub, 0.02);
+    scene.environment = VIEW.envRT.texture;
+    dome.material.dispose();
+    floor.geometry.dispose();
+    floor.material.dispose();
   }
+}
+
+/** 홀이 바뀌면 코스를 새로 만든다 */
+function buildHole(hole) {
+  if (VIEW.holeKey === hole.name + hole.layout.seed) return;
+  VIEW.holeKey = hole.name + hole.layout.seed;
+  if (VIEW.group) {
+    VIEW.scene.remove(VIEW.group);
+    disposeGroup(VIEW.group);
+  }
+  const g = new THREE.Group();
+  applyTheme(hole);
+  const paint = paintCourse(hole);
+  g.add(terrainMesh(hole, paint));
+  g.add(outerLand(hole));
+  buildWater(hole, g);
+  buildTrees(hole, g);
+  buildRocks(hole, g);
+  buildTufts(hole, g);
+  buildFlag(hole, g);
+  buildGreenArrows(hole, g);
+  VIEW.group = g;
+  VIEW.scene.add(g);
+  VIEW.paint = paint;
+  VIEW.miniDirty = true;
+}
+
+/* ───────── 매 프레임 ───────── */
+
+function resizeView(W, H, offsetY) {
+  VIEW.W = W; VIEW.H = H;
+  const dpr = Math.min(window.devicePixelRatio || 1, W < 700 ? 1.5 : 2);
+  VIEW.R.setPixelRatio(dpr);
+  VIEW.R.setSize(W, H, false);
+  VIEW.camera.aspect = W / H;
+  VIEW.camera.fov = W < H ? 62 : 44;
+  VIEW.camera.setViewOffset(W, H, 0, offsetY, W, H);
+  VIEW.camera.updateProjectionMatrix();
+}
+
+function placeCamera(G) {
+  const c = VIEW.camera, g = G.cam;
+  c.position.set(g.px, g.py, g.pz);
+  c.lookAt(g.lx, g.ly, g.lz);
+  VIEW.skyMesh.position.copy(c.position);
+}
+
+function updateSunTarget(focus) {
+  VIEW.sun.target.position.copy(focus);
+  VIEW.sun.position.copy(focus).addScaledVector(VIEW.sunDir, 220);
+}
+
+function updateGolfer(G) {
+  const rig = MODELS.rig;
+  const show = !!G.hole;
+  rig.group.visible = show;
+  if (!show) return;
+  const gf = G.golfer;
+  const club = G.swingClub || G.club;
+  applyAppearance(rig, G.equip, club);
+  rig.group.position.set(gf.x, heightAt(G.hole, gf.x, gf.z), gf.z);
+  rig.group.rotation.y = -gf.yaw;
+  rig.group.updateMatrixWorld(true);
+  if (gf.pose === 'dance') {
+    if (!rig.dancing) {
+      rig.dancing = true;
+      resetBones(rig);
+      rig.clips.Dance_Loop.reset().play();
+      if (rig.club) rig.club.visible = false;
+    }
+    rig.mixer.setTime(G.time);
+    return;
+  }
+  if (rig.dancing) {
+    rig.dancing = false;
+    rig.clips.Dance_Loop.stop();
+    if (rig.club) rig.club.visible = true;
+  }
+  poseGolfer(rig, gf.phi, club);
+}
+
+function updateBallView(G) {
+  const b = G.ball;
+  const has = !!b && !!G.hole && !b.holed;
+  VIEW.ball.visible = VIEW.ballBlob.visible = has;
+  VIEW.ballGlow.visible = has && !!G.shotStyle && b.mode !== 'stop';
+  if (!has) return;
+  const camDist = VIEW.camera.position.distanceTo(_vTmp.set(b.x, b.y, b.z));
+  const sc = Math.max(1, camDist / 14);
+  VIEW.ball.scale.setScalar(sc);
+  VIEW.ball.position.set(b.x, b.y + 0.0235 * sc, b.z);
+  VIEW.ball.rotation.x = b.rot;
+  const gy = heightAt(G.hole, b.x, b.z);
+  const alt = Math.max(0, b.y - gy);
+  const s = 0.028 * sc * (1 + alt * 0.04);
+  VIEW.ballBlob.scale.set(s, s, 1);
+  VIEW.ballBlob.position.set(b.x, gy + 0.02, b.z);
+  VIEW.ballBlob.material.opacity = clamp(0.5 - alt * 0.008, 0.14, 0.5);
+  if (VIEW.ballGlow.visible) {
+    const sp = SPECIAL_SHOTS[G.shotStyle];
+    VIEW.ballGlow.material.color.set(sp ? sp.glow : '#ffd25a');
+    VIEW.ballGlow.scale.setScalar(sc * 0.45);
+    VIEW.ballGlow.position.copy(VIEW.ball.position);
+  }
+}
+
+var _vTmp;
+
+function updateTrail(G) {
+  const T = G.trail, N = VIEW.trailMax;
+  const geo = VIEW.trail.geometry;
+  const pa = geo.attributes.position.array, ca = geo.attributes.color.array;
+  const n = Math.min(T.length, N);
+  VIEW.trail.visible = n >= 2;
+  if (n < 2) return;
+  const sp = SPECIAL_SHOTS[G.shotStyle];
+  const c0 = sp ? sp.trail[0].split(',') : G.shotStyle === 'perfect' ? ['255', '214', '84'] : ['255', '255', '255'];
+  const cam = VIEW.camera.position;
+  const dir = new THREE.Vector3(), side = new THREE.Vector3(), toCam = new THREE.Vector3(), p = new THREE.Vector3(), q = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    const a = T[Math.min(i, n - 1)], b = T[Math.min(i + 1, n - 1)], a0 = T[Math.max(Math.min(i, n - 1) - 1, 0)];
+    p.set(a.x, a.y, a.z);
+    q.set(b.x, b.y, b.z);
+    dir.subVectors(q, a0 === a && a === b ? p : p).add(p.clone().sub(a0 ? new THREE.Vector3(a0.x, a0.y, a0.z) : p));
+    toCam.subVectors(cam, p).normalize();
+    side.crossVectors(dir, toCam).normalize();
+    const u = Math.min(i, n - 1) / (n - 1);
+    const w = clamp(cam.distanceTo(p) * 0.0045, 0.012, 0.32) * (0.2 + u * 0.8);
+    for (let k = 0; k < 2; k++) {
+      const s = k ? -w : w;
+      const o = (i * 2 + k) * 3;
+      pa[o] = p.x + side.x * s;
+      pa[o + 1] = p.y + side.y * s;
+      pa[o + 2] = p.z + side.z * s;
+      const c = (i * 2 + k) * 4;
+      ca[c] = +c0[0] / 255;
+      ca[c + 1] = +c0[1] / 255;
+      ca[c + 2] = +c0[2] / 255;
+      ca[c + 3] = (i < n ? u * u : 0) * 0.62 * G.trailFade;
+    }
+  }
+  geo.attributes.position.needsUpdate = true;
+  geo.attributes.color.needsUpdate = true;
+}
+
+function updateAimView(G) {
+  const aiming = !!G.hole && (G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact');
+  const ring = VIEW.ring, beam = VIEW.beam, dots = VIEW.dots;
+  const showFull = aiming && G.markerX != null && G.club !== 'PT';
+  ring.visible = beam.visible = showFull;
+  dots.visible = aiming && G.preview.length > 1;
+  if (showFull) {
+    const y = heightAt(G.hole, G.markerX, G.markerZ);
+    const camD = VIEW.camera.position.distanceTo(_vTmp.set(G.markerX, y, G.markerZ));
+    const rr = clamp(camD * 0.05, 2.4, 13);
+    ring.scale.set(rr, rr, 1);
+    ring.position.set(G.markerX, y + 0.4, G.markerZ);
+    beam.position.set(G.markerX, y + 20, G.markerZ);
+    beam.scale.set(rr * 0.07, 1, rr * 0.07);
+  }
+  if (dots.visible) {
+    const M = new THREE.Matrix4();
+    const P = new THREE.Vector3(), S = new THREE.Vector3(), Q = new THREE.Quaternion();
+    const n = Math.min(G.preview.length, dots.count);
+    for (let i = 0; i < n; i++) {
+      const pt = G.preview[i];
+      P.set(pt.x, pt.y, pt.z);
+      const d = VIEW.camera.position.distanceTo(P);
+      S.setScalar(clamp(d * 0.0035, 0.02, 0.5));
+      M.compose(P, Q, S);
+      dots.setMatrixAt(i, M);
+    }
+    dots.count = n;
+    dots.instanceMatrix.needsUpdate = true;
+  }
+  const arrows = VIEW.arrows;
+  arrows.visible = aiming && G.club === 'PT';
+  if (arrows.visible) {
+    const M = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const col = new THREE.Color();
+    const phase = (G.time * 0.55) % 1;
+    arrows.userData.pts.forEach(([x, z], i) => {
+      const g = gradAt(G.hole, x, z);
+      const pct = Math.hypot(g[0], g[1]) * 100;
+      const ang = Math.atan2(-g[1], -g[0]);
+      const ax = x + Math.cos(ang) * phase * 1.8, az = z + Math.sin(ang) * phase * 1.8;
+      P.set(ax, heightAt(G.hole, ax, az) + 0.03, az);
+      Q.setFromAxisAngle(up, -ang);
+      S.setScalar(0.26 + Math.min(pct, 4) * 0.05);
+      M.compose(P, Q, S);
+      arrows.setMatrixAt(i, M);
+      col.set(pct < 1 ? '#ffffff' : pct < 2.2 ? '#ffe45c' : '#ff9a3d');
+      arrows.setColorAt(i, col);
+    });
+    arrows.instanceMatrix.needsUpdate = true;
+    if (arrows.instanceColor) arrows.instanceColor.needsUpdate = true;
+  }
+}
+
+function updateFlag(G) {
+  if (!VIEW.flag) return;
+  const pos = VIEW.flag.geometry.attributes.position, base = VIEW.flagBase;
+  const speed = 5 + Math.hypot(G.wind, G.windZ);
+  for (let i = 0; i < pos.count; i++) {
+    const x = base[i * 3];
+    pos.setZ(i, Math.sin(x * 5.5 - G.time * speed) * 0.09 * (x / 1.15));
+    pos.setY(i, base[i * 3 + 1] + Math.sin(x * 3.1 - G.time * speed * 0.7) * 0.03 * x);
+  }
+  pos.needsUpdate = true;
+  VIEW.flag.geometry.computeVertexNormals();
+  VIEW.flag.rotation.y = -Math.atan2(G.windZ, G.wind);
+}
+
+function updateParticles(G) {
+  const list = VIEW.sprites;
+  const n = Math.min(G.fx.length, list.length);
+  for (let i = 0; i < list.length; i++) {
+    const sp = list[i];
+    if (i >= n) { sp.visible = false; continue; }
+    const p = G.fx[i];
+    const u = p.life / p.max;
+    sp.visible = true;
+    sp.material = fxMaterial(p.tex, p.color, p.add);
+    sp.position.set(p.x, p.y, p.z);
+    const s = p.size * (1 + (1 - u) * p.grow);
+    sp.scale.set(s, s, 1);
+    sp.material.opacity = clamp(u * (p.alpha || 1), 0, 1);
+  }
+}
+
+function renderGame(G) {
+  if (!VIEW.ready) return;
+  _vTmp = _vTmp || new THREE.Vector3();
+  const hole = G.hole || G.titleHole;
+  if (!hole) return;
+  buildHole(hole);
+  placeCamera(G);
+  updateSunTarget(_vTmp.set(G.cam.lx, G.hole ? G.cam.ly : 0, G.cam.lz).clone());
+  updateGolfer(G);
+  updateBallView(G);
+  updateTrail(G);
+  updateAimView(G);
+  updateFlag(G);
+  updateParticles(G);
+  if (VIEW.waterTex) {
+    VIEW.waterTex.offset.x = G.time * 0.012;
+    VIEW.waterTex.offset.y = G.time * 0.007;
+  }
+  VIEW.R.render(VIEW.scene, VIEW.camera);
+}
+
+/** 위에서 본 코스 지도 */
+function drawMinimap(G, x, w, h) {
+  const hole = G.hole;
+  if (!hole || !VIEW.paint) return;
+  const P = VIEW.paint;
+  const zs = [];
+  for (let wx = 0; wx <= hole.end; wx += 10) zs.push(centerZ(hole, wx));
+  const midZ = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const x0 = -12, x1 = hole.end + 4;
+  const scale = h / (x1 - x0);
+  const halfWorldZ = w / 2 / scale;
+  if (VIEW.miniDirty || VIEW.miniW !== w) {
+    VIEW.miniDirty = false;
+    VIEW.miniW = w;
+    const c = mkCanvas(w * 2, h * 2);
+    const m = c.getContext('2d');
+    m.scale(2, 2);
+    m.translate(w / 2, h);
+    m.rotate(-Math.PI / 2);
+    const sw = (x1 - x0) * P.k, sh = halfWorldZ * 2 * P.k;
+    m.drawImage(P.canvas, (x0 - P.B.x0) * P.k, (midZ - halfWorldZ - P.B.z0) * P.k, sw, sh, 0, -w / 2, h, w);
+    VIEW.miniBg = c;
+  }
+  x.clearRect(0, 0, w, h);
+  x.drawImage(VIEW.miniBg, 0, 0, w, h);
+  const px = (wz) => w / 2 + (wz - midZ) * scale;
+  const py = (wx) => h - (wx - x0) * scale;
+  const S = holeShapes(hole);
+  const b = G.ball;
   if (G.markerX != null && G.club !== 'PT' && (G.phase === 'aim' || G.phase === 'power' || G.phase === 'impact')) {
-    x.fillStyle = '#ffe97a';
-    x.fillRect(px(G.markerX) - 1, my + 3, 2, mh - 6);
+    x.strokeStyle = 'rgba(255,240,150,.95)';
+    x.lineWidth = 1.5;
+    x.setLineDash([3, 3]);
+    x.beginPath();
+    x.moveTo(px(b.z), py(b.x));
+    x.lineTo(px(G.markerZ), py(G.markerX));
+    x.stroke();
+    x.setLineDash([]);
+    x.beginPath();
+    x.arc(px(G.markerZ), py(G.markerX), 3.5, 0, 6.3);
+    x.stroke();
   }
-  if (hole.layout) {
-    x.fillStyle = '#1d6b3e';
-    for (const t of hole.layout.trees) {
-      const tx = px(t.x), ty = py(heightAt(hole, t.x));
-      x.beginPath();
-      x.moveTo(tx, ty - 11);
-      x.lineTo(tx + 4.5, ty);
-      x.lineTo(tx - 4.5, ty);
-      x.closePath();
-      x.fill();
-    }
-    x.fillStyle = '#d7dde4';
-    for (const rock of hole.layout.rocks) {
-      x.beginPath();
-      x.arc(px(rock.x), py(heightAt(hole, rock.x)) - 2, 2.2, 0, Math.PI * 2);
-      x.fill();
-    }
-  }
-  const fx = px(hole.cup), fy = py(heightAt(hole, hole.cup));
-  x.strokeStyle = '#ffffff';
+  const fx = px(S.cupZ), fy = py(hole.cup);
+  x.strokeStyle = '#fff';
   x.lineWidth = 1.4;
   x.beginPath();
   x.moveTo(fx, fy);
-  x.lineTo(fx, fy - 15);
+  x.lineTo(fx, fy - 11);
   x.stroke();
-  x.fillStyle = '#ff4b4b';
+  x.fillStyle = '#ff3d3d';
   x.beginPath();
-  x.moveTo(fx, fy - 15);
-  x.lineTo(fx + 9, fy - 11);
-  x.lineTo(fx, fy - 7);
+  x.moveTo(fx, fy - 11);
+  x.lineTo(fx + 7, fy - 8);
+  x.lineTo(fx, fy - 5);
   x.fill();
-  const b = G.ball;
-  x.fillStyle = '#ffffff';
-  x.strokeStyle = '#183058';
-  x.lineWidth = 1.6;
+  x.fillStyle = '#fff';
+  x.strokeStyle = '#123';
+  x.lineWidth = 1.3;
   x.beginPath();
-  x.arc(px(b.x), Math.max(my + 5, py(Math.min(b.y, hi + 8))) - 2, 3.8 + Math.sin(G.time * 6) * 0.6, 0, Math.PI * 2);
+  x.arc(px(b.z), py(b.x), 3.6, 0, 6.3);
   x.fill();
   x.stroke();
-  x.restore();
-}
-
-function outlineText(x, text, px, py, size, fill, stroke, weight) {
-  x.font = (weight || 900) + ' ' + size + 'px ' + FONT_HEAVY;
-  x.textAlign = 'center';
-  x.lineJoin = 'round';
-  x.lineWidth = size * 0.2;
-  x.strokeStyle = stroke;
-  x.strokeText(text, px, py);
-  x.fillStyle = fill;
-  x.fillText(text, px, py);
-}
-
-function drawPopups(c) {
-  const { x, W, H, G } = c;
-  if (G.pop) {
-    const p = G.pop;
-    const u = 1 - p.t / p.max;
-    const inT = clamp(u / 0.14, 0, 1);
-    const k = p.big ? 1 + (1 - inT) * 0.55 : 0.75 + inT * 0.25;
-    const a = clamp(p.t / 0.32, 0, 1);
-    const py = G.view.cy - H * 0.12;
-    x.save();
-    x.translate(W / 2, py);
-    if (p.big) {
-      x.save();
-      x.globalAlpha = a * 0.36;
-      x.globalCompositeOperation = 'lighter';
-      x.rotate(G.time * 0.9);
-      const rayLen = Math.max(W, H) * 0.65;
-      for (let i = 0; i < 14; i++) {
-        x.rotate((Math.PI * 2) / 14);
-        const g = x.createLinearGradient(0, 0, 0, rayLen);
-        g.addColorStop(0, p.color);
-        g.addColorStop(1, 'rgba(255,255,255,0)');
-        x.fillStyle = g;
-        x.beginPath();
-        x.moveTo(0, 0);
-        x.lineTo(-30, rayLen);
-        x.lineTo(30, rayLen);
-        x.fill();
-      }
-      x.restore();
-    }
-    x.globalAlpha = a;
-    x.scale(k, k);
-    const size = Math.min(W * 0.21, p.big ? 112 : 64);
-    outlineText(x, p.text, 0, 0, size, p.fill || '#ffe25a', p.stroke || '#b3261e');
-    if (p.sub) outlineText(x, p.sub, 0, size * 0.72, size * 0.34, '#ffffff', 'rgba(20,40,70,.9)', 800);
-    x.restore();
-  }
-  x.globalAlpha = 1;
 }
