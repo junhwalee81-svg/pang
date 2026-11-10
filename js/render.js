@@ -71,6 +71,22 @@ function buildSharedObjects() {
   VIEW.ballBlob = new THREE.Mesh(new THREE.CircleGeometry(1, 20), new THREE.MeshBasicMaterial({ color: 0x06180c, transparent: true, opacity: 0.4, depthWrite: false }));
   VIEW.ballBlob.rotation.x = -Math.PI / 2;
   scene.add(VIEW.ballBlob);
+  // 공 위치 표시: 풀에 가리거나 멀어도 보이게 항상 맨 앞에 그린다
+  const lc = mkCanvas(64, 96);
+  const lx = lc.getContext('2d');
+  lx.fillStyle = '#ffe24a';
+  lx.strokeStyle = 'rgba(20,30,60,.85)';
+  lx.lineWidth = 6;
+  lx.beginPath();
+  lx.moveTo(10, 10); lx.lineTo(54, 10); lx.lineTo(32, 52); lx.closePath();
+  lx.stroke();
+  lx.fill();
+  const ltex = new THREE.CanvasTexture(lc);
+  ltex.encoding = THREE.sRGBEncoding;
+  VIEW.locator = new THREE.Sprite(new THREE.SpriteMaterial({ map: ltex, depthTest: false, depthWrite: false, transparent: true, fog: false }));
+  VIEW.locator.renderOrder = 20;
+  VIEW.locator.center.set(0.5, 0);
+  scene.add(VIEW.locator);
   VIEW.ballGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: VIEW.fxTex.light, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
   scene.add(VIEW.ballGlow);
 
@@ -714,9 +730,10 @@ function updateBallView(G) {
   const has = !!b && !!G.hole && !b.holed;
   VIEW.ball.visible = VIEW.ballBlob.visible = has;
   VIEW.ballGlow.visible = has && !!G.shotStyle && b.mode !== 'stop';
+  VIEW.locator.visible = has && (G.phase === 'ball' || G.phase === 'stopped');
   if (!has) return;
   const camDist = VIEW.camera.position.distanceTo(_vTmp.set(b.x, b.y, b.z));
-  const sc = Math.max(1, camDist / 14);
+  const sc = Math.max(1.2, camDist / 9);
   VIEW.ball.scale.setScalar(sc);
   VIEW.ball.position.set(b.x, b.y + 0.0235 * sc, b.z);
   VIEW.ball.rotation.x = b.rot;
@@ -726,6 +743,11 @@ function updateBallView(G) {
   VIEW.ballBlob.scale.set(s, s, 1);
   VIEW.ballBlob.position.set(b.x, gy + 0.02, b.z);
   VIEW.ballBlob.material.opacity = clamp(0.5 - alt * 0.008, 0.14, 0.5);
+  if (VIEW.locator.visible) {
+    const ls = clamp(camDist * 0.035, 0.18, 6);
+    VIEW.locator.scale.set(ls * 0.66, ls, 1);
+    VIEW.locator.position.set(b.x, b.y + 0.12 * sc + ls * 0.25 + Math.abs(Math.sin(G.time * 5)) * ls * 0.15, b.z);
+  }
   if (VIEW.ballGlow.visible) {
     const sp = SPECIAL_SHOTS[G.shotStyle];
     VIEW.ballGlow.material.color.set(sp ? sp.glow : '#ffd25a');

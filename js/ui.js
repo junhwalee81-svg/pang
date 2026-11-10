@@ -1,8 +1,16 @@
-/* DOM 화면, 입력, 상점, 게임 루프. */
+/* DOM 화면, 입력(터치·스페이스·제스처 커맨드), 상점, 게임 루프. */
 
-var UI = {};
+var UI = { padKey: '', ink: [], inkFade: 0, dots: [] };
 var shopSlot = 'char';
 var canvas;
+
+// 화살표 순서 → 특수샷. 회오리는 마지막 방향으로 휘는 쪽을 정한다
+var KEY_COMMANDS = (() => {
+  const list = [];
+  for (const id of SPECIAL_ORDER) for (const k of SPECIAL_SHOTS[id].keys) list.push({ id, keys: k, dir: k === 'RUL' ? -1 : 1 });
+  return list;
+})();
+var GESTURE = { tapMax: 14, swipeMin: 60, circleTurn: 4.6, dotCount: 3, dotWindow: 1.4 };
 
 function $(id) { return document.getElementById(id); }
 
@@ -13,10 +21,10 @@ function resize() {
   const hudBox = $('hud').getBoundingClientRect();
   const panelH = $('panel').offsetHeight || 190;
   const top = hudBox.height ? hudBox.bottom : 54;
+  const wide = W >= 900;
   G.view.W = W;
   G.view.H = H;
   // 조작판을 뺀 영역의 가운데가 화면 중심이 되도록 카메라를 민다
-  const wide = W >= 900;
   G.view.offsetY = !G.hole ? 0 : wide ? Math.round(H * 0.05) : Math.round(panelH * 0.62 - top * 0.5);
   if (VIEW.R) resizeView(W, H, G.view.offsetY);
   const mini = $('mini');
@@ -30,9 +38,152 @@ function resize() {
   $('slopeBox').style.top = top + 8 + 'px';
   UI.miniW = mw;
   UI.miniH = mh;
+  const ink = $('ink');
+  ink.width = W;
+  ink.height = H;
+  const pad = $('padCanvas');
+  const ps = $('ballPad').clientWidth || 92;
+  pad.width = pad.height = ps * 2;
+  UI.padKey = '';
 }
 
-/* ───────── HUD ───────── */
+/* ───────── 제스처 ───────── */
+
+/** 화면에 그린 한 획을 판별한다: dot·up·down·cw·ccw 또는 null */
+function recognizeGesture(points) {
+  if (!points.length) return null;
+  const a = points[0], z = points[points.length - 1];
+  let len = 0, turn = 0, prevAng = null;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i - 1].x, dy = points[i].y - points[i - 1].y;
+    const d = Math.hypot(dx, dy);
+    len += d;
+    if (d < 3) continue;
+    const ang = Math.atan2(dy, dx);
+    if (prevAng !== null) {
+      let delta = ang - prevAng;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      turn += delta;
+    }
+    prevAng = ang;
+  }
+  if (len < GESTURE.tapMax) return 'dot';
+  if (Math.abs(turn) >= GESTURE.circleTurn) return turn > 0 ? 'cw' : 'ccw';
+  const dx = z.x - a.x, dy = z.y - a.y;
+  if (Math.abs(dy) >= GESTURE.swipeMin && Math.abs(dy) > Math.abs(dx) * 1.3) return dy < 0 ? 'up' : 'down';
+  return null;
+}
+
+/** 제스처 → 커맨드 */
+function applyGesture(kind) {
+  if (G.phase !== 'power' || G.club === 'PT' || !kind) return;
+  if (kind === 'dot') {
+    const now = G.time;
+    UI.dots = UI.dots.filter((t) => now - t < GESTURE.dotWindow);
+    UI.dots.push(now);
+    if (UI.dots.length >= GESTURE.dotCount) { UI.dots = []; commandDone(inputCommand('dot', 1)); }
+    else toast('점 ' + UI.dots.length + '/' + GESTURE.dotCount);
+    return;
+  }
+  UI.dots = [];
+  if (kind === 'up') commandDone(inputCommand('tomahawk', 1));
+  else if (kind === 'down') commandDone(inputCommand('spike', 1));
+  else if (kind === 'cw') commandDone(inputCommand('tornado', 1));
+  else if (kind === 'ccw') commandDone(inputCommand('tornado', -1));
+}
+
+function commandDone(ok) {
+  if (!ok || !G.command) return;
+  const sp = SPECIAL_SHOTS[G.command.id];
+  toast(sp.icon + ' ' + sp.name + (G.command.id === 'tornado' ? (G.command.dir > 0 ? ' (오른쪽)' : ' (왼쪽)') : '') + ' 입력 — 정확히 맞혀야 나가요');
+}
+
+function toast(text) {
+  const el = $('cmdToast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(UI.toastT);
+  UI.toastT = setTimeout(() => el.classList.remove('show'), 1300);
+}
+
+function drawInk() {
+  const c = $('ink');
+  const x = c.getContext('2d');
+  x.clearRect(0, 0, c.width, c.height);
+  if (!UI.ink.length) return;
+  x.globalAlpha = UI.inkFade;
+  x.lineCap = x.lineJoin = 'round';
+  x.strokeStyle = 'rgba(255,240,140,.9)';
+  x.shadowColor = 'rgba(255,200,60,.9)';
+  x.shadowBlur = 14;
+  x.lineWidth = 7;
+  x.beginPath();
+  UI.ink.forEach((p, i) => (i ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y)));
+  x.stroke();
+  x.globalAlpha = 1;
+}
+
+/* ───────── 타점 공 ───────── */
+
+function drawPad() {
+  const c = $('padCanvas');
+  const p = G.impactPt;
+  const key = c.width + ':' + p.x.toFixed(3) + ':' + p.y.toFixed(3) + G.club + G.phase;
+  if (key === UI.padKey) return;
+  UI.padKey = key;
+  const x = c.getContext('2d');
+  const S = c.width, R = S * 0.43, cx = S / 2, cy = S / 2;
+  x.clearRect(0, 0, S, S);
+  const g = x.createRadialGradient(cx - R * 0.35, cy - R * 0.4, R * 0.1, cx, cy, R);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.7, '#e8eef3');
+  g.addColorStop(1, '#a9b8c6');
+  x.fillStyle = g;
+  x.beginPath();
+  x.arc(cx, cy, R, 0, Math.PI * 2);
+  x.fill();
+  x.fillStyle = 'rgba(95,120,150,.18)';
+  for (let i = 0; i < 46; i++) {
+    const a = i * 2.39996, r = Math.sqrt(i / 46) * R * 0.92;
+    x.beginPath();
+    x.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, R * 0.045, 0, Math.PI * 2);
+    x.fill();
+  }
+  x.strokeStyle = 'rgba(30,60,110,.35)';
+  x.lineWidth = S * 0.012;
+  x.beginPath();
+  x.moveTo(cx - R, cy); x.lineTo(cx + R, cy);
+  x.moveTo(cx, cy - R); x.lineTo(cx, cy + R);
+  x.stroke();
+  const putt = G.club === 'PT';
+  const dx = cx + p.x * R * 0.82, dy = cy + p.y * R * 0.82;
+  x.fillStyle = putt ? 'rgba(120,130,140,.6)' : '#ec3f3f';
+  x.strokeStyle = '#ffffff';
+  x.lineWidth = S * 0.025;
+  x.beginPath();
+  x.arc(dx, dy, R * 0.17, 0, Math.PI * 2);
+  x.fill();
+  x.stroke();
+  x.font = '800 ' + Math.round(S * 0.095) + 'px "Malgun Gothic", sans-serif';
+  x.textAlign = 'center';
+  x.fillStyle = 'rgba(25,45,85,.72)';
+  x.fillText('톱', cx, cy - R * 0.62);
+  x.fillText('백', cx, cy + R * 0.78);
+}
+
+function padText() {
+  if (G.club === 'PT') return '퍼터는 타점 없음';
+  const p = G.impactPt;
+  const parts = [];
+  if (Math.abs(p.y) >= 0.08) parts.push((p.y > 0 ? '백스핀 ' : '톱스핀 ') + Math.round(Math.abs(p.y) * 100) + '%');
+  const loft = CLUB_TYPES[G.club].loft + G.angle;
+  parts.push('각도 ' + Math.round(loft) + '°');
+  if (Math.abs(p.x) >= 0.08) parts.push((p.x > 0 ? '오른쪽' : '왼쪽') + ' 휨');
+  return parts.join(' · ');
+}
+
+/* ───────── 입력 ───────── */
 
 function buildControls() {
   const box = $('clubs');
@@ -44,16 +195,11 @@ function buildControls() {
     b.addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); setClub(id); });
     box.appendChild(b);
   });
-  const row = $('specials');
-  SPECIAL_ORDER.forEach((id) => {
-    const b = document.createElement('button');
-    b.className = 'special';
-    b.dataset.special = id;
-    b.innerHTML = '<b>' + SPECIAL_SHOTS[id].name + '</b><small>' + SPECIAL_SHOTS[id].desc + '</small>';
-    b.addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); setSpecial(id); });
-    row.appendChild(b);
-  });
-  const bind = (id, fn) => $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); fn(); });
+  $('cmdHelp').innerHTML = SPECIAL_ORDER.map((id) => {
+    const s = SPECIAL_SHOTS[id];
+    const keys = s.keys[0].split('').map((k) => ({ U: '↑', D: '↓', L: '←', R: '→' })[k]).join('');
+    return '<span><i>' + s.icon + '</i><b>' + s.name + '</b><em>' + s.gesture + ' · ' + keys + '</em></span>';
+  }).join('');
   const hold = (id, fn) => {
     const el = $(id);
     let timer = null;
@@ -63,38 +209,70 @@ function buildControls() {
   };
   hold('yawLeft', () => setYaw(G.club === 'PT' ? -0.5 : -1));
   hold('yawRight', () => setYaw(G.club === 'PT' ? 0.5 : 1));
-  bind('angleDown', () => setAngle(-1));
-  bind('angleUp', () => setAngle(1));
-  bind('spinTop', () => setSpin(-0.25));
-  bind('spinBack', () => setSpin(0.25));
-  bind('shot', () => pressShot());
-  bind('shopBtn', () => openShop());
-  // 화면을 좌우로 끌어 조준한다
-  let drag = null;
+  const press = (e) => { e.preventDefault(); SFX.unlock(); pressShot(); };
+  $('shot').addEventListener('pointerdown', press);
+  $('gauge').addEventListener('pointerdown', press);
+  $('shopBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); openShop(); });
+
+  // 타점 공: 끌어서 맞힐 점을 정한다
+  const pad = $('ballPad');
+  const setFrom = (e) => {
+    const r = pad.getBoundingClientRect();
+    const R = r.width * 0.43 * 0.82;
+    setImpactPoint((e.clientX - r.left - r.width / 2) / R, (e.clientY - r.top - r.height / 2) / R);
+  };
+  let padDrag = false;
+  pad.addEventListener('pointerdown', (e) => { e.preventDefault(); SFX.unlock(); padDrag = true; pad.setPointerCapture(e.pointerId); setFrom(e); });
+  pad.addEventListener('pointermove', (e) => { if (padDrag) setFrom(e); });
+  pad.addEventListener('pointerup', () => { padDrag = false; });
+  pad.addEventListener('dblclick', () => setImpactPoint(0, 0));
+
+  // 게임 화면: 조준 중에는 끌어 방향, 톡 치면 샷 시작. 게이지가 오르는 동안은 커맨드를 그린다
+  let touch = null;
   canvas.addEventListener('pointerdown', (e) => {
     SFX.unlock();
-    if (G.phase === 'power' || G.phase === 'impact' || G.phase === 'intro') { pressShot(); return; }
-    if (G.phase === 'aim') drag = { x: e.clientX };
+    if (G.phase === 'intro') { pressShot(); return; }
+    if (G.phase === 'impact') { pressShot(); return; }
+    touch = { x: e.clientX, y: e.clientY, moved: 0, phase: G.phase, pts: [{ x: e.clientX, y: e.clientY }] };
+    if (G.phase === 'power') { UI.ink = touch.pts; UI.inkFade = 1; }
+    canvas.setPointerCapture(e.pointerId);
   });
-  window.addEventListener('pointermove', (e) => {
-    if (!drag || G.phase !== 'aim') return;
-    const dx = e.clientX - drag.x;
-    drag.x = e.clientX;
-    setYaw(dx * (G.club === 'PT' ? 0.05 : 0.14));
+  canvas.addEventListener('pointermove', (e) => {
+    if (!touch) return;
+    const dx = e.clientX - touch.x;
+    touch.moved += Math.abs(dx) + Math.abs(e.clientY - touch.y);
+    touch.pts.push({ x: e.clientX, y: e.clientY });
+    if (touch.phase === 'aim' && G.phase === 'aim' && touch.moved > 8) setYaw(dx * (G.club === 'PT' ? 0.05 : 0.14));
+    touch.x = e.clientX;
+    touch.y = e.clientY;
   });
-  window.addEventListener('pointerup', () => { drag = null; });
+  canvas.addEventListener('pointerup', () => {
+    if (!touch) return;
+    const t = touch;
+    touch = null;
+    if (t.phase === 'aim' && G.phase === 'aim' && t.moved <= 8) pressShot();
+    else if (t.phase === 'power' && G.phase === 'power') applyGesture(recognizeGesture(t.pts));
+  });
+
   window.addEventListener('keydown', (e) => {
     if ($('modal').classList.contains('show') || $('title').classList.contains('show')) return;
     SFX.unlock();
-    if (e.code === 'KeyQ') setSpecial('tomahawk');
-    if (e.code === 'KeyE') setSpecial('spike');
-    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (!e.repeat) pressShot(); }
-    else if (e.code === 'ArrowLeft') setYaw(-1);
+    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (!e.repeat) pressShot(); return; }
+    const arrow = { ArrowUp: 'U', ArrowDown: 'D', ArrowLeft: 'L', ArrowRight: 'R' }[e.code];
+    if (G.phase === 'power' && arrow) {
+      e.preventDefault();
+      UI.keys = ((UI.keys || '') + arrow).slice(-3);
+      const hit = KEY_COMMANDS.find((c) => UI.keys.endsWith(c.keys));
+      if (hit) { UI.keys = ''; commandDone(inputCommand(hit.id, hit.dir)); }
+      return;
+    }
+    if (G.phase !== 'aim') return;
+    if (e.code === 'ArrowLeft') setYaw(-1);
     else if (e.code === 'ArrowRight') setYaw(1);
-    else if (e.code === 'ArrowUp') setAngle(1);
-    else if (e.code === 'ArrowDown') setAngle(-1);
-    else if (e.code === 'KeyZ') setSpin(-0.25);
-    else if (e.code === 'KeyX') setSpin(0.25);
+    else if (e.code === 'KeyW') moveImpactPoint(0, -0.2);
+    else if (e.code === 'KeyS') moveImpactPoint(0, 0.2);
+    else if (e.code === 'KeyA') moveImpactPoint(-0.2, 0);
+    else if (e.code === 'KeyD') moveImpactPoint(0.2, 0);
     else if (/^Digit[1-4]$/.test(e.code)) setClub(CLUB_ORDER[+e.code.slice(5) - 1]);
   });
 }
@@ -103,14 +281,14 @@ function clubReachText(id) {
   if (id === 'PT') return Math.round(CLUB_TYPES.PT.v0 * CLUB_TYPES.PT.v0 / (2 * TERRAIN.green.mu * PHYS.g)) + 'm';
   UI.reach = UI.reach || {};
   const key = id + JSON.stringify(G.stats);
-  if (UI.reach[key] == null) UI.reach[key] = Math.round(simulateShot({ club: id, stats: G.stats }).carry);
+  if (UI.reach[key] == null) UI.reach[key] = Math.round(simulateShot({ club: id, stats: G.stats, impact: PHYS.impactBase + 1e-6 }).carry);
   return UI.reach[key] + 'm';
 }
 
 function shotLabel() {
-  if (G.phase === 'aim') return '샷 시작';
-  if (G.phase === 'power') return '파워!';
-  if (G.phase === 'impact') return '임팩트!';
+  if (G.phase === 'aim') return '샷';
+  if (G.phase === 'power') return '파워';
+  if (G.phase === 'impact') return '임팩트';
   if (G.phase === 'intro') return '건너뛰기';
   return '···';
 }
@@ -119,6 +297,7 @@ function gaugePercent(pos) { return ((pos - GAME.impactFloor) / (1 - GAME.impact
 
 function syncHud() {
   syncPop();
+  if (UI.inkFade > 0) { UI.inkFade = Math.max(0, UI.inkFade - 0.04); drawInk(); if (!UI.inkFade) UI.ink = []; }
   const hole = G.hole;
   if (!hole) return;
   setText($('holeNo'), 'H' + (G.holeIndex + 1));
@@ -147,25 +326,18 @@ function syncHud() {
     setText(b.querySelector('small'), clubReachText(id));
   });
   syncSlope();
-  const unlocked = specialUnlocked();
-  $('specialLock').classList.toggle('hide', unlocked);
-  setText($('specialLock'), '🔒 이번 홀 팡 ' + Math.min(G.perfects, SPECIAL_UNLOCK) + '/' + SPECIAL_UNLOCK + ' — 2회면 특수샷 해금');
-  document.querySelectorAll('.special').forEach((b) => {
-    b.classList.toggle('hide', !unlocked);
-    b.classList.toggle('on', G.special === b.dataset.special);
-    b.classList.toggle('tomahawk', b.dataset.special === 'tomahawk');
-    b.disabled = !canAdjust || G.club === 'PT';
-  });
-  const club = CLUB_TYPES[G.club];
-  setText($('angleV'), G.club === 'PT' ? '–' : Math.round(club.loft + G.angle + (G.special ? SPECIAL_SHOTS[G.special].loftAdd : 0)) + '°');
-  setText($('spinV'), G.club === 'PT' ? '–' : spinLabel());
-  $('spinDot').style.transform = 'translateY(' + G.spin * 9 + 'px)';
+  drawPad();
+  $('ballPad').classList.toggle('off', !canAdjust || G.club === 'PT');
+  setText($('padInfo'), padText());
+  $('cmdHelp').classList.toggle('live', G.phase === 'power' && G.club !== 'PT');
+  $('cmdHelp').classList.toggle('hide', G.club === 'PT');
   const pinYaw = (Math.atan2(c.z - G.ball.z, c.x - G.ball.x) * 180) / Math.PI;
   const off = G.yaw - pinYaw;
-  setText($('yawV'), Math.abs(off) < 0.25 ? '핀' : (off < 0 ? '좌 ' : '우 ') + Math.abs(off).toFixed(off > -10 && off < 10 ? 1 : 0) + '°');
+  setText($('yawV'), Math.abs(off) < 0.25 ? '핀 방향' : (off < 0 ? '좌 ' : '우 ') + Math.abs(off).toFixed(off > -10 && off < 10 ? 1 : 0) + '°');
   $('shot').disabled = !(canAdjust || G.phase === 'power' || G.phase === 'impact' || G.phase === 'intro');
   setText($('shot'), shotLabel());
   $('shot').dataset.step = G.phase;
+  $('gauge').dataset.step = G.phase;
   const zoneHalf = statFactors(G.stats).perfectHalf;
   const scale = 100 / (1 - GAME.impactFloor);
   $('gZone').style.left = gaugePercent(-zoneHalf) + '%';
@@ -176,7 +348,7 @@ function syncHud() {
   $('gFill').style.width = fillTo * scale + '%';
   $('gMark').style.left = gaugePercent(G.phase === 'aim' ? 0 : G.gauge.pos) + '%';
   $('gMark').classList.toggle('hot', G.phase === 'impact');
-  setText($('gPct'), Math.round((G.phase === 'power' ? G.gauge.pos : showPower ? G.gauge.power : 0) * 100) + '%');
+  setText($('gPct'), G.command && G.phase !== 'aim' ? SPECIAL_SHOTS[G.command.id].icon + ' ' + SPECIAL_SHOTS[G.command.id].name : Math.round((G.phase === 'power' ? G.gauge.pos : showPower ? G.gauge.power : 0) * 100) + '%');
   const mini = $('mini');
   const x = mini.getContext('2d');
   x.setTransform(2, 0, 0, 2, 0, 0);
@@ -222,11 +394,6 @@ function syncSlope() {
   const down = (Math.atan2(-g[1], -g[0]) * 180) / Math.PI - G.yaw - 90;
   $('slopeArrow').style.transform = 'rotate(' + down + 'deg)';
   $('slopeArrow').style.opacity = pct < 0.3 ? 0.25 : 1;
-}
-
-function spinLabel() {
-  if (G.spin === 0) return '없음';
-  return (G.spin > 0 ? '백 ' : '톱 ') + Math.round(Math.abs(G.spin) * 100) + '%';
 }
 
 /* ───────── 화면 전환 ───────── */
@@ -376,7 +543,7 @@ function buyOrEquip(slot, item) {
 }
 
 function openCredits() {
-  openModal('<h2>크레딧</h2><p class="credit">3D 캐릭터: <b>Quaternius</b> (CC0)<br>하늘·나무·물 질감: <b>Poly Haven</b> (CC0), three.js (MIT)<br>입자: <b>Kenney</b> (CC0) · 잔디·흙·모래: <b>ambientCG</b> (CC0)<br>렌더링: <b>three.js</b> (MIT)<br>효과음: WebAudio 직접 합성</p><div class="row"><button class="primary" id="mDone">닫기</button></div>');
+  openModal('<h2>크레딧</h2><p class="credit">3D 캐릭터: <b>Quaternius</b> (CC0)<br>하늘·나무: <b>Poly Haven</b> (CC0)<br>입자: <b>Kenney</b> (CC0) · 잔디·흙·모래: <b>ambientCG</b> (CC0)<br>렌더링·물 질감: <b>three.js</b> (MIT)<br>효과음: WebAudio 직접 합성</p><div class="row"><button class="primary" id="mDone">닫기</button></div>');
   $('mDone').onclick = closeModal;
 }
 

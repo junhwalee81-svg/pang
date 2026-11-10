@@ -29,6 +29,10 @@ for (const h of HOLES) {
 
 // 평지 비거리는 변하지 않고, 임팩트 오차는 좌우로 휜다
 check('평지 비거리 불변', Math.abs(simulateShot({ club: '1W' }).carry - simulateShot({ club: '1W', seed: 555 }).carry) < 1e-6);
+const curveR = simulateShot({ club: '1W', curve: 1 }).lateral, curveL = simulateShot({ club: '1W', curve: -1 }).lateral;
+check('타점 좌우로 휨', curveR > 10 && curveL < -10, curveR.toFixed(1) + 'm / ' + curveL.toFixed(1) + 'm');
+const tor = simulateShot({ club: '1W', special: 'tornado', curveDir: -1 }).lateral;
+check('회오리가 고른 쪽으로 휨', tor < -20, tor.toFixed(1) + 'm');
 const slice = simulateShot({ club: '1W', impact: 0.1 }).lateral;
 const hook = simulateShot({ club: '1W', impact: -0.1 }).lateral;
 check('늦으면 슬라이스, 빠르면 훅', slice > 5 && hook < -5, slice.toFixed(1) + 'm / ' + hook.toFixed(1) + 'm');

@@ -164,3 +164,29 @@ button:disabled { cursor: default; }
 #pop.big #popText { font-size: clamp(66px, 22vw, 120px); -webkit-text-stroke: 10px #b3261e; }
 #popSub { font-weight: 800; font-size: clamp(15px, 4.4vw, 26px); color: #fff; -webkit-text-stroke: 4px rgba(16, 40, 90, .9); paint-order: stroke fill; }
 .pill.pin small span { font-weight: 800; }
+
+/* 타점 공·커맨드·얇은 게이지 (2026-11-11) */
+#ink { position: fixed; inset: 0; pointer-events: none; }
+#cmdToast { position: fixed; left: 50%; top: 42%; transform: translate(-50%, 8px); padding: 8px 14px; border-radius: 12px; background: rgba(18, 30, 70, .82); border: 1px solid rgba(255, 230, 120, .6); font-weight: 800; font-size: 14px; color: #fff3b0; white-space: nowrap; opacity: 0; transition: opacity .15s, transform .15s; pointer-events: none; }
+#cmdToast.show { opacity: 1; transform: translate(-50%, 0); }
+.rowAim { display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: stretch; }
+#ballPad { width: 96px; height: 96px; border-radius: 50%; touch-action: none; cursor: grab; position: relative; filter: drop-shadow(0 4px 8px rgba(0, 10, 40, .45)); }
+#ballPad canvas { width: 100%; height: 100%; display: block; }
+#ballPad.off { opacity: .55; pointer-events: none; }
+.aimSide { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.aimSide .tune { padding: 3px 4px; }
+.aimSide .tune button { height: 30px; min-width: 42px; }
+#padInfo { font-size: 11.5px; font-weight: 800; color: #d8f6ff; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cmdHelp { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 6px; transition: background .2s; border-radius: 9px; padding: 3px; }
+#cmdHelp span { display: grid; grid-template-columns: 17px 1fr; column-gap: 4px; align-items: center; line-height: 1.3; min-width: 0; }
+#cmdHelp i { font-style: normal; font-size: 15px; grid-row: 1 / 3; text-align: center; color: #ffe066; }
+#cmdHelp b { font-size: 11px; }
+#cmdHelp em { font-style: normal; font-size: 9.5px; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cmdHelp.live { background: rgba(255, 224, 102, .16); box-shadow: inset 0 0 0 1px rgba(255, 224, 102, .55); }
+.rowShot { grid-template-columns: 1fr 86px; }
+#gauge { height: 30px; border-radius: 10px; cursor: pointer; touch-action: none; }
+#gMark { width: 3px; margin-left: -1.5px; }
+#gPct { font-size: 12.5px; }
+#shot { font-size: 15px; border-radius: 12px; margin-bottom: 3px; }
+#gauge[data-step="impact"] { border-color: #7bf0c8; }
+.rowTune, .rowSpecial { display: none; }

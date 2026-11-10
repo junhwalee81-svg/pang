@@ -87,22 +87,73 @@ async function run(width, height, name) {
   const next = await page.evaluate(() => ({ hole: G.holeIndex, phase: G.phase, modal: document.getElementById('modal').classList.contains('show') }));
   await page.evaluate(() => { resize(); readyNextShot(); placeBall(G.hole.cup - 150); });
 
-  // 특수샷: 해금 전 잠김, 2회 후 선택 가능
+  // 커맨드 특수샷: 게이지가 오를 때 입력하고, 임팩트가 판정 폭 안일 때만 나간다
   const special = await page.evaluate(() => {
-    G.perfects = 1; setSpecial('tomahawk');
-    const locked = G.special === null;
-    G.perfects = 2; setClub('5I'); setSpecial('tomahawk');
+    setClub('5I');
     const flat = { hole: undefined, x: 0, z: 0, yaw: 0, lie: 1 };
-    const hi = simulateShot(shotOptions(flat)); setSpecial('spike');
-    const lo = simulateShot(shotOptions(flat));
-    return { locked, pick: G.special, hiApex: hi.apex, loApex: lo.apex, hiRun: hi.total - hi.carry, loRun: lo.total - lo.carry };
+    const hi = simulateShot(shotOptions(Object.assign({ special: 'tomahawk' }, flat)));
+    const lo = simulateShot(shotOptions(Object.assign({ special: 'spike' }, flat)));
+    const aimReject = inputCommand('tomahawk');
+    const line = (x0, y0, x1, y1) => Array.from({ length: 12 }, (_, i) => ({ x: x0 + ((x1 - x0) * i) / 11, y: y0 + ((y1 - y0) * i) / 11 }));
+    const circle = (dir) => Array.from({ length: 40 }, (_, i) => ({ x: 200 + 60 * Math.cos((dir * i * 6.6) / 39), y: 300 + 60 * Math.sin((dir * i * 6.6) / 39) }));
+    const gest = [recognizeGesture(line(200, 400, 205, 250)), recognizeGesture(line(200, 250, 204, 400)), recognizeGesture(circle(1)), recognizeGesture(circle(-1)), recognizeGesture([{ x: 10, y: 10 }, { x: 12, y: 11 }])];
+    return { hiApex: hi.apex, loApex: lo.apex, hiRun: hi.total - hi.carry, loRun: lo.total - lo.carry, aimReject, gest };
   });
-  await step(page, 0.1);
-  await snap('9special');
-  await shoot(page, 0.7, 0);
-  await until(page, ['stopped', 'holed']);
-  if (!special.locked || special.pick !== 'spike' || !(special.hiApex > special.loApex) || !(special.loRun > special.hiRun)) errors.push('special check failed');
   console.log('special', JSON.stringify(special));
+  if (!(special.hiApex > special.loApex) || !(special.loRun > special.hiRun) || special.aimReject || special.gest.join() !== 'up,down,cw,ccw,dot') errors.push('special check failed');
+
+  // 임팩트를 놓치면 타수 없이 다시
+  const cancel = await page.evaluate(() => {
+    const s0 = G.strokes;
+    pressShot(); G.gauge.pos = 0.6; pressShot();
+    for (let t = 0; t < 3 && G.phase === 'impact'; t += 1 / 60) updateGame(1 / 60);
+    return { phase: G.phase, same: G.strokes === s0 };
+  });
+  if (cancel.phase !== 'aim' || !cancel.same) errors.push('cancel failed ' + JSON.stringify(cancel));
+
+  // 키보드 커맨드(↑↑) + 정확한 임팩트 → 토마호크
+  await page.evaluate(() => { pressShot(); });
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  const keyCmd = await page.evaluate(() => (G.command ? G.command.id : null));
+  await step(page, 0.05);
+  await snap('9command');
+  await page.evaluate(() => { G.gauge.pos = 0.85; pressShot(); G.gauge.pos = 0; pressShot(); window.__step(0.3); });
+  const fired = await page.evaluate(() => G.shotStyle);
+  await until(page, ['stopped', 'holed']);
+  await page.evaluate(() => readyNextShot());
+  // 커맨드가 있어도 임팩트가 빗나가면 일반 샷
+  const missed = await page.evaluate(() => {
+    if (G.phase !== 'aim') readyNextShot();
+    pressShot(); inputCommand('spike'); G.gauge.pos = 0.5; pressShot(); G.gauge.pos = 0.1; pressShot();
+    for (let t = 0; t < 0.4; t += 1 / 60) updateGame(1 / 60);
+    return { style: G.shotStyle, pop: G.pop && G.pop.text };
+  });
+  await until(page, ['stopped', 'holed']);
+  await page.evaluate(() => readyNextShot());
+  // 화면 제스처: 위로 긋기와 점 세 번
+  const box = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }));
+  const cx = box.w * 0.5, cy = box.h * 0.32;
+  await page.evaluate(() => { if (G.phase !== 'aim') readyNextShot(); pressShot(); });
+  await page.mouse.move(cx, cy + 90);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) await page.mouse.move(cx + i * 0.4, cy + 90 - i * 18);
+  await page.mouse.up();
+  const swipe = await page.evaluate(() => (G.command ? G.command.id : null));
+  await page.evaluate(() => { G.command = null; });
+  for (let i = 0; i < 3; i++) { await page.mouse.click(cx, cy); }
+  const dots = await page.evaluate(() => (G.command ? G.command.id : null));
+  await page.evaluate(() => { cancelShot(); G.pop = null; setClub('5I'); window.__step(0.02); });
+  // 타점 공: 아래쪽을 누르면 백스핀과 높은 각도
+  const padBox = await page.evaluate(() => { const r = document.getElementById('ballPad').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height * 0.85 }; });
+  await page.mouse.click(padBox.x, padBox.y);
+  const pad = await page.evaluate(() => ({ y: G.impactPt.y, spin: G.spin, angle: G.angle, curve: G.curve }));
+  await step(page, 0.05);
+  await snap('9pad');
+  console.log('command', JSON.stringify({ keyCmd, fired, missed, swipe, dots, pad }));
+  if (keyCmd !== 'tomahawk' || fired !== 'tomahawk' || missed.style === 'spike' || missed.pop !== '커맨드 실패' || swipe !== 'tomahawk' || dots !== 'dot' || !(pad.y > 0.5 && pad.angle > 0)) errors.push('command check failed');
+  await page.evaluate(() => setImpactPoint(0, 0));
+
   await page.evaluate(() => readyNextShot());
 
   // 나무: 공의 실제 궤적 위에 시험용 나무를 놓아 충돌 이벤트를 확인한다

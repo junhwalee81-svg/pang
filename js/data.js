@@ -1,23 +1,26 @@
 /* 게임 데이터: 클럽·장비·홀. 밸런스 수치는 이 파일 상단 표에서만 고친다. */
 
 // v0: 최대 발사 속도(m/s), loft: 기본 발사각(도), spin: 기본 백스핀, spinCtl: 스핀 입력 효과
-// angleRange: 각도 조절 폭(도), reach: 어드레스 때 공까지의 거리(그림용), len: 샤프트 길이(그림용)
+// curveCtl: 좌우 타점이 휘게 하는 힘, angleRange: 위아래 타점에 따른 발사각 변화(도), reach: 어드레스 때 공까지의 거리(그림용), len: 샤프트 길이(그림용)
 var CLUB_TYPES = {
-  '1W': { name: '드라이버', v0: 74.5, loft: 13, spin: 0.42, spinCtl: 0.3, angleRange: 8, len: 1.12, head: 'wood' },
-  '5I': { name: '5번 아이언', v0: 50.2, loft: 22, spin: 0.8, spinCtl: 0.45, angleRange: 10, len: 0.98, head: 'iron' },
-  'SW': { name: '샌드 웨지', v0: 32.6, loft: 50, spin: 1.2, spinCtl: 0.6, angleRange: 14, len: 0.9, head: 'wedge' },
-  'PT': { name: '퍼터', v0: 7.1, loft: 0, spin: 0, spinCtl: 0, angleRange: 0, len: 0.86, head: 'putter' },
+  '1W': { name: '드라이버', v0: 74.5, loft: 13, spin: 0.42, spinCtl: 0.3, curveCtl: 0.5, angleRange: 6, len: 1.12, head: 'wood' },
+  '5I': { name: '5번 아이언', v0: 50.2, loft: 22, spin: 0.8, spinCtl: 0.45, curveCtl: 0.45, angleRange: 7, len: 0.98, head: 'iron' },
+  'SW': { name: '샌드 웨지', v0: 32.6, loft: 50, spin: 1.2, spinCtl: 0.6, curveCtl: 0.32, angleRange: 9, len: 0.9, head: 'wedge' },
+  'PT': { name: '퍼터', v0: 7.1, loft: 0, spin: 0, spinCtl: 0, curveCtl: 0, angleRange: 0, len: 0.86, head: 'putter' },
 };
 var CLUB_ORDER = ['1W', '5I', 'SW', 'PT'];
 
-// 특수샷. loftAdd: 발사각 추가(도), speedMul: 속도 배율, spinAdd: 스핀 추가
-// restMul·tangMul: 첫 착지 반발·수평 유지 배율, muMul: 구름 저항 배율
-var SPECIAL_UNLOCK = 2; // 같은 홀에서 이만큼 팡을 내면 해금
+// 특수샷: 게이지가 오르는 동안 커맨드를 넣고 임팩트가 판정 폭 안에 들어가야 나간다.
+// loftAdd: 발사각 추가(도), speedMul: 속도 배율, spinAdd: 스핀 추가, side: 휘는 힘(회오리는 그린 방향에 따라 부호)
+// restMul·tangMul: 첫 착지 반발·수평 유지 배율, muMul: 구름 저항 배율, backMul: 백스핀이 공을 끄는 힘 배율
+// gesture: 화면에 그리는 모양, keys: 키보드 화살표 순서(U·D·L·R)
 var SPECIAL_SHOTS = {
-  tomahawk: { name: '토마호크', desc: '고탄도 · 착지 후 거의 안 구름', loftAdd: 18, speedMul: 0.86, spinAdd: 0.05, restMul: 0.3, tangMul: 0.16, muMul: 6, trail: ['255,105,180', '170,80,255'], glow: '#ff78c8' },
-  spike: { name: '스파이크', desc: '저탄도 · 강한 런', loftAdd: -4, speedMul: 1, spinAdd: -0.1, restMul: 1, tangMul: 1.15, muMul: 0.55, trail: ['110,240,255', '50,140,255'], glow: '#6ee8ff' },
+  tomahawk: { name: '토마호크', desc: '고탄도 · 착지 후 거의 안 구름', gesture: '위로 긋기', keys: ['UU'], icon: '⤒', loftAdd: 18, speedMul: 0.86, spinAdd: 0.05, restMul: 0.3, tangMul: 0.16, muMul: 6, trail: ['255,105,180', '170,80,255'], glow: '#ff78c8' },
+  spike: { name: '스파이크', desc: '저탄도 · 강한 런', gesture: '아래로 긋기', keys: ['DD'], icon: '⤓', loftAdd: -4, speedMul: 1, spinAdd: -0.1, restMul: 1, tangMul: 1.15, muMul: 0.55, trail: ['110,240,255', '50,140,255'], glow: '#6ee8ff' },
+  tornado: { name: '회오리', desc: '크게 휘어 들어가는 샷', gesture: '원 그리기', keys: ['LUR', 'RUL'], icon: '↻', loftAdd: 3, speedMul: 1.03, spinAdd: 0, side: 0.62, restMul: 1, tangMul: 1, muMul: 1, trail: ['190,255,120', '40,200,120'], glow: '#9dff7a' },
+  dot: { name: '도트', desc: '떨어진 뒤 뒤로 끌려오는 샷', gesture: '점 세 번 찍기', keys: ['UDU'], icon: '⁘', loftAdd: 0, speedMul: 0.95, spinAdd: 0.2, backMul: 5, restMul: 0.7, tangMul: 1, muMul: 1, trail: ['255,236,120', '255,150,40'], glow: '#ffe066' },
 };
-var SPECIAL_ORDER = ['tomahawk', 'spike'];
+var SPECIAL_ORDER = ['tomahawk', 'spike', 'tornado', 'dot'];
 
 var STAT_KEYS = ['power', 'control', 'impact', 'spin'];
 var STAT_NAMES = { power: '파워', control: '컨트롤', impact: '임팩트', spin: '스핀' };
@@ -113,5 +116,5 @@ var HOLES = [
 ];
 
 if (typeof module !== 'undefined') {
-  Object.assign(globalThis, { TREE_KINDS, SPECIAL_UNLOCK, SPECIAL_SHOTS, SPECIAL_ORDER, CLUB_TYPES, CLUB_ORDER, STAT_KEYS, STAT_NAMES, SLOT_ORDER, SLOT_NAMES, ITEMS, DEFAULT_EQUIP, THEMES, HOLES });
+  Object.assign(globalThis, { TREE_KINDS, SPECIAL_SHOTS, SPECIAL_ORDER, CLUB_TYPES, CLUB_ORDER, STAT_KEYS, STAT_NAMES, SLOT_ORDER, SLOT_NAMES, ITEMS, DEFAULT_EQUIP, THEMES, HOLES });
 }

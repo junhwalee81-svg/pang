@@ -34,7 +34,7 @@ var G = {
   hole: null, titleHole: null, holeIndex: 0, scores: [], strokes: 0, wind: 0, windZ: 0,
   ball: null, lastX: 0, lastZ: 0, trail: [], trailFade: 1, fx: [],
   golfer: { x: 0, z: 0, yaw: 0, phi: 0, pose: null },
-  club: '1W', swingClub: null, angle: 0, spin: 0, yaw: 0, special: null, markerX: null, markerZ: null, preview: [],
+  club: '1W', swingClub: null, angle: 0, spin: 0, yaw: 0, special: null, curve: 0, impactPt: { x: 0, y: 0 }, command: null, markerX: null, markerZ: null, preview: [],
   gauge: { pos: 0, dir: 1, power: 0 },
   shot: null, shotStyle: null, stopT: 0, swingT: 0, launched: false, phiTop: 0, followT: null,
   perfects: 0, introT: 0, holedT: 0, resultShown: false, accum: 0,
@@ -174,8 +174,8 @@ function passiveOptions() {
 
 function shotOptions(extra) {
   return Object.assign(passiveOptions(), {
-    club: G.club, power: 1, angle: G.angle, spin: G.spin, yaw: G.yaw, stats: G.stats, impact: 0,
-    hole: G.hole, x: G.ball.x, z: G.ball.z, wind: 0, windZ: 0, lie: lieMul(G.ball.x, G.ball.z, G.club), special: G.club === 'PT' ? null : G.special,
+    club: G.club, power: 1, angle: G.angle, spin: G.spin, curve: G.club === 'PT' ? 0 : G.curve, yaw: G.yaw, stats: G.stats, impact: 0,
+    hole: G.hole, x: G.ball.x, z: G.ball.z, wind: 0, windZ: 0, lie: lieMul(G.ball.x, G.ball.z, G.club), special: null,
   }, extra || {});
 }
 
@@ -208,21 +208,51 @@ function recomputeMarker() {
   G.markerZ = b.z;
 }
 
-function specialUnlocked() { return G.perfects >= SPECIAL_UNLOCK; }
-
-/** 샷 전에 특수샷을 고른다. 다시 누르면 해제 */
-function setSpecial(id) {
-  if (G.phase !== 'aim' || G.club === 'PT' || !specialUnlocked()) return;
-  G.special = G.special === id ? null : id;
+/** 큰 공에서 맞힐 점. x: -1 왼쪽 ~ 1 오른쪽(휘는 방향), y: -1 위(톱스핀·낮은 탄도) ~ 1 아래(백스핀·높은 탄도) */
+function setImpactPoint(x, y) {
+  if (G.phase !== 'aim') return;
+  const r = Math.hypot(x, y);
+  if (r > 1) { x /= r; y /= r; }
+  const putt = G.club === 'PT';
+  G.impactPt = { x: putt ? 0 : x, y: putt ? 0 : y };
+  G.spin = G.impactPt.y;
+  G.angle = G.impactPt.y * CLUB_TYPES[G.club].angleRange;
+  G.curve = G.impactPt.x;
   recomputeMarker();
+}
+
+function resetImpactPoint() {
+  G.impactPt = { x: 0, y: 0 };
+  G.spin = 0;
+  G.angle = 0;
+  G.curve = 0;
+}
+
+/** 게이지가 오르는 동안 들어온 특수샷 커맨드. dir: 회오리가 휘는 방향(+1 오른쪽) */
+function inputCommand(id, dir) {
+  if (G.phase !== 'power' || G.club === 'PT' || !SPECIAL_SHOTS[id]) return false;
+  G.command = { id, dir: dir || 1 };
+  SFX.play('lock');
+  return true;
+}
+
+/** 임팩트를 놓치거나 게이지가 내려오면 타수 없이 처음으로 */
+function cancelShot() {
+  G.phase = 'aim';
+  G.gauge.pos = 0;
+  G.gauge.dir = 1;
+  G.gauge.power = 0;
+  G.golfer.phi = 0;
+  G.command = null;
+  G.pop = { text: '다시!', sub: '타수 없이 다시 칩니다', t: 0.8, max: 0.8, fill: '#ffffff' };
   SFX.play('ui');
 }
 
 function readyShot() {
   G.phase = 'aim';
-  G.angle = 0;
-  G.spin = 0;
+  resetImpactPoint();
   G.special = null;
+  G.command = null;
   G.gauge.pos = 0;
   G.gauge.dir = 1;
   G.gauge.power = 0;
@@ -266,27 +296,15 @@ function nextHole() {
 function setClub(id) {
   if (G.phase !== 'aim') return;
   G.club = id;
-  G.angle = 0;
-  G.spin = 0;
-  if (id === 'PT') G.special = null;
+  resetImpactPoint();
   syncGolfer();
   recomputeMarker();
   SFX.play('ui');
 }
 
-function setAngle(delta) {
-  if (G.phase !== 'aim') return;
-  const range = CLUB_TYPES[G.club].angleRange;
-  G.angle = clamp(G.angle + delta, -range, range);
-  recomputeMarker();
-  SFX.play('ui');
-}
-
-function setSpin(delta) {
-  if (G.phase !== 'aim' || G.club === 'PT') return;
-  G.spin = clamp(Math.round((G.spin + delta) * 4) / 4, -1, 1);
-  recomputeMarker();
-  SFX.play('ui');
+/** 키보드로 타점을 옮긴다 */
+function moveImpactPoint(dx, dy) {
+  setImpactPoint(G.impactPt.x + dx, G.impactPt.y + dy);
 }
 
 /** 좌우 조준(도, +는 오른쪽) */
@@ -304,6 +322,7 @@ function pressShot() {
     G.phase = 'power';
     G.gauge.pos = 0;
     G.gauge.dir = 1;
+    G.command = null;
     SFX.play('gauge');
   } else if (G.phase === 'power') {
     G.gauge.power = Math.max(0.02, G.gauge.pos);
@@ -326,7 +345,11 @@ function hitBall(err) {
 
 function launchNow() {
   const s = G.shot;
-  const o = shotOptions({ power: s.power, impact: s.impact });
+  // 커맨드가 있고 임팩트가 판정 폭 안이어야 특수샷이 나간다
+  const cmd = G.command;
+  const exact = G.club !== 'PT' && Math.abs(s.impact) <= statFactors(G.stats).perfectHalf;
+  const o = shotOptions({ power: s.power, impact: s.impact, special: exact && cmd ? cmd.id : null, curveDir: cmd ? cmd.dir : 1 });
+  G.command = null;
   const lp = launchFrom(o);
   G.lastX = G.ball.x;
   G.lastZ = G.ball.z;
@@ -342,22 +365,21 @@ function launchNow() {
   G.accum = 0;
   if (lp.perfect) onPerfect(o.special);
   else {
-    if (o.special) G.pop = { text: SPECIAL_SHOTS[o.special].name, t: 0.8, max: 0.8, fill: '#ffffff' };
+    if (cmd) G.pop = { text: '커맨드 실패', sub: '임팩트가 판정 폭을 벗어났어요', t: 1, max: 1, fill: '#ffb3a8' };
     SFX.play('hit', G.swingClub);
     spawn('smoke', G.ball.x, G.ball.y + 0.1, G.ball.z, 4, { color: '#f4f0d0', size: 0.5, speed: 1.5, life: 0.5, up: 0.6 });
   }
 }
 
 function onPerfect(special) {
-  const unlockedBefore = specialUnlocked();
   G.perfects++;
   const pas = currentPassive();
   G.coins += GAME.coinsPerfect * (pas.kind === 'perfectCoinMul' ? pas.value : 1);
   G.flash = 0.55;
   G.shake = 9;
-  const newly = !unlockedBefore && specialUnlocked();
-  const sub = special ? SPECIAL_SHOTS[special].name + ' 퍼펙트' : newly ? '특수샷 해금!' : '퍼펙트 임팩트';
-  G.pop = { text: '팡!', sub, t: 0.95, max: 0.95, big: true };
+  G.pop = special
+    ? { text: SPECIAL_SHOTS[special].name + '!', sub: '특수샷 성공', t: 1.1, max: 1.1, big: true, fill: SPECIAL_SHOTS[special].glow }
+    : { text: '팡!', sub: '퍼펙트 · 비거리 UP', t: 0.95, max: 0.95, big: true };
   SFX.play('hitPerfect', G.swingClub);
   spawn('star', G.ball.x, G.ball.y + 0.15, G.ball.z, 18, { color: '#ffe066', size: 0.32, speed: 5, life: 0.75, add: true });
   spawn('ring', G.ball.x, G.ball.y + 0.15, G.ball.z, 1, { color: '#fff3c0', size: 0.5, speed: 0, life: 0.34, add: true, grow: 4 });
@@ -381,12 +403,12 @@ function updateGame(dt) {
     const g = G.gauge;
     g.pos += g.dir * GAME.gaugeSpeed * dt;
     if (g.pos >= 1) { g.pos = 1; g.dir = -1; }
-    if (g.pos <= 0 && g.dir < 0) { g.pos = 0; G.phase = 'aim'; G.golfer.phi = 0; }
+    if (g.pos <= 0 && g.dir < 0) { cancelShot(); return; }
     G.golfer.phi = -g.pos * (G.club === 'PT' ? GAME.puttBackswing : GAME.backswing);
   } else if (p === 'impact') {
     const g = G.gauge;
     g.pos -= GAME.impactSpeed * dt;
-    if (g.pos <= GAME.impactFloor) { g.pos = GAME.impactFloor; hitBall(GAME.impactFloor); }
+    if (g.pos <= GAME.impactFloor) cancelShot();
   } else if (p === 'swing') {
     updateSwing(dt);
   } else if (p === 'ball') {
@@ -644,12 +666,14 @@ function updateCamera(dt) {
     const dir = h > 1.5 ? { x: b.vx / h, z: b.vz / h } : G.camDir || aim;
     G.camDir = dir;
     const alt = Math.max(0, b.y - gy);
-    const back = b.mode === 'air' ? 13 + alt * 0.25 : 8;
+    // 굴러갈 때는 낮고 가깝게 따라가 공이 잘 보이게 한다
+    const back = b.mode === 'air' ? 13 + alt * 0.25 : 5.5;
     px = b.x - dir.x * back;
     pz = b.z - dir.z * back;
-    py = Math.max(b.y + 3.5 - alt * 0.12, gy + 3.2);
-    lx = b.x + dir.x * 8;
-    lz = b.z + dir.z * 8;
+    py = b.mode === 'air' ? Math.max(b.y + 3.5 - alt * 0.12, gy + 3.2) : gy + 1.9;
+    const ahead = b.mode === 'air' ? 8 : 3;
+    lx = b.x + dir.x * ahead;
+    lz = b.z + dir.z * ahead;
     ly = b.y + (b.mode === 'air' ? -1.5 : 0.2);
     rate = 6;
   }

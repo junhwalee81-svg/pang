@@ -24,7 +24,8 @@ var PHYS = {
   impactBase: 0.022,      // 완벽 판정 절반 폭(게이지 비율)
   impactPerStat: 0.0016,  // 임팩트 1당 판정 폭 증가
   spinPerStat: 0.03,      // 스핀 효과 × (1 + (스핀-10)×값)
-  perfectBoost: 1.035,    // 완벽 임팩트 속도 배율
+  perfectBoost: 1.065,    // 완벽 임팩트(커맨드 없음) 속도 배율 — 비거리가 늘어난다
+  specialBoost: 1.03,     // 특수샷이 나갈 때의 속도 배율
   errSpeed: 0.75,         // 오차 → 속도 손실
   errAngle: 26,           // 오차 → 각도 오차(도)
   errSpin: 1.2,           // 오차 → 스핀 손실
@@ -402,12 +403,12 @@ function launchFrom(o) {
   }
   const sp = SPECIAL_SHOTS[o.special] || null;
   let v = c.v0 * Math.pow(clamp(o.power, 0.02, 1), PHYS.powerExp) * f.powerMul * (sp ? sp.speedMul : 1);
-  if (perfect) v *= PHYS.perfectBoost;
+  if (perfect) v *= sp ? PHYS.specialBoost : PHYS.perfectBoost;
   if (o.club === '1W' && o.driverDist) v *= Math.pow(o.driverDist, PHYS.distToSpeed);
   v *= (o.lie || 1) * (1 - clamp(miss * PHYS.errSpeed, 0, 0.6));
   const ang = c.loft + (o.angle || 0) + (sp ? sp.loftAdd : 0) + sign * miss * PHYS.errAngle;
   const spin = (c.spin + (sp ? sp.spinAdd : 0) + (o.spin || 0) * c.spinCtl * f.spinMul) * (1 - clamp(miss * PHYS.errSpin, 0, 0.8));
-  return { v, ang, yaw: (o.yaw || 0) + sign * miss * PHYS.errYaw, spin, side: sign * miss * PHYS.errSide, perfect, miss, putt: false };
+  return { v, ang, yaw: (o.yaw || 0) + sign * miss * PHYS.errYaw, spin, side: sign * miss * PHYS.errSide + (o.curve || 0) * (c.curveCtl || 0) * f.spinMul + (sp && sp.side ? sp.side * (o.curveDir || 1) : 0), perfect, miss, putt: false };
 }
 
 function makeBall(x, y, z) {
@@ -743,7 +744,7 @@ function simulateShot(o) {
 /** 샷 옵션 → 공 진행 환경 */
 function shotEnv(o) {
   const sp = SPECIAL_SHOTS[o.special] || null;
-  return { wind: o.wind || 0, windZ: o.windZ || 0, windMul: o.windMul == null ? 1 : o.windMul, backMul: o.backMul || 1, ignoreHazards: !!o.ignoreHazards, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
+  return { wind: o.wind || 0, windZ: o.windZ || 0, windMul: o.windMul == null ? 1 : o.windMul, backMul: (o.backMul || 1) * (sp && sp.backMul ? sp.backMul : 1), ignoreHazards: !!o.ignoreHazards, restMul: sp ? sp.restMul : 1, tangMul: sp ? sp.tangMul : 1, muMul: sp ? sp.muMul : 1 };
 }
 
 if (typeof module !== 'undefined') {
