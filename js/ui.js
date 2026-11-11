@@ -558,7 +558,7 @@ function buyOrEquip(slot, item) {
 }
 
 function openCredits() {
-  openModal('<h2>크레딧</h2><p class="credit">3D 캐릭터: <b>Quaternius</b> (CC0)<br>하늘·나무: <b>Poly Haven</b> (CC0)<br>입자: <b>Kenney</b> (CC0) · 잔디·흙·모래: <b>ambientCG</b> (CC0)<br>렌더링·물 질감: <b>three.js</b> (MIT)<br>효과음: WebAudio 직접 합성</p><div class="row"><button class="primary" id="mDone">닫기</button></div>');
+  openModal('<h2>크레딧</h2><p class="credit">3D 캐릭터: <b>VRoid 프로젝트</b> 샘플 모델 (CC0)<br>하늘·나무: <b>Poly Haven</b> (CC0)<br>입자: <b>Kenney</b> (CC0) · 잔디·흙·모래: <b>ambientCG</b> (CC0)<br>렌더링·물 질감: <b>three.js</b> (MIT)<br>효과음: WebAudio 직접 합성</p><div class="row"><button class="primary" id="mDone">닫기</button></div>');
   $('mDone').onclick = closeModal;
 }
 

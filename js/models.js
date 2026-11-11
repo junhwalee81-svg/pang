@@ -1,15 +1,27 @@
-/* 3D 캐릭터(뼈대 포즈, 옷 색, 머리·모자·클럽)와 상점 아이콘. 게임 상태를 바꾸지 않는다. */
+/* 3D 캐릭터(VRoid 애니 모델, 뼈대 포즈, 옷·머리 색, 모자·클럽)와 상점 아이콘. 게임 상태를 바꾸지 않는다. */
 
+// body: 'boy' | 'girl' 모델. 색은 기본 그림에 곱한다(머리·바지·신발 그림은 밝은 회색으로 구워 둠)
 var CHAR_LOOK = {
-  leo: { skin: '#f0c39a', hair: '#8a4f2a', style: 'swept', shirt: '#3fae6b', pants: '#efe6d2', shoes: '#f4f1e8' },
-  mina: { skin: '#f6d2b3', hair: '#6b3f22', style: 'pony', shirt: '#5aa7e0', pants: '#fbfbf6', shoes: '#e0e4ea' },
-  kai: { skin: '#8d5a3b', hair: '#1f1a18', style: 'flat', shirt: '#f0a13a', pants: '#43507f', shoes: '#f4f4ef' },
-  sora: { skin: '#a87048', hair: '#221a18', style: 'bun', shirt: '#37b36f', pants: '#6a5cc8', shoes: '#f4f4ef' },
-  zombie: { skin: '#7fc48a', hair: '#26302b', style: 'spike', shirt: '#6b4fa0', pants: '#b07a45', shoes: '#33363d' },
-  gbot: { skin: '#8fb0cd', hair: null, style: 'bot', shirt: '#4a6a8c', pants: '#2f4258', shoes: '#20262f', metal: true },
+  leo: { body: 'boy', skin: '#fbe2d2', hair: '#9a5a2e', shirt: '#3fae6b', pants: '#f2ead8', shoes: '#f4f1e8' },
+  mina: { body: 'girl', skin: '#fde6d8', hair: '#f2c46a', shirt: '#7cc2f2', pants: '#ffffff', shoes: '#ffffff' },
+  kai: { body: 'boy', skin: '#c98e66', hair: '#2a2220', shirt: '#f0a13a', pants: '#43507f', shoes: '#f4f4ef' },
+  sora: { body: 'girl', skin: '#e9bf9c', hair: '#ff8fb0', shirt: '#9be0b0', pants: '#ffffff', shoes: '#f4f4ef' },
+  zombie: { body: 'boy', skin: '#9fd6a4', hair: '#3c5a48', shirt: '#7a5fb0', pants: '#b07a45', shoes: '#4a4d55' },
+  gbot: { body: 'boy', skin: '#c9d7e8', hair: '#8fb0d6', shirt: '#4a6a8c', pants: '#2f4258', shoes: '#20262f' },
 };
 
-var RIG_CFG = { armR: 0.53, tilt: 28, armRatio: 0.88, clubRatio: 1.2, drop: 0.075, stance: 0.13, lean: 0.34 };
+var RIG_CFG = { armR: 0.5, tilt: 28, armRatio: 0.88, clubRatio: 1.2, drop: 0.07, stance: 0.12, lean: 0.34 };
+// 만화풍 음영: 그늘·밝은 면 밝기(0~255)와 기본 피부색(그림 원래 색)
+var TOON = { shade: 92, lit: 150, skinRef: '#fbe4d6', hairLift: 0.022, hatScale: 1.15 };
+// VRoid 뼈 이름 → 자세 코드가 쓰는 이름
+var BONE_ALIAS = {
+  pelvis: 'J_Bip_C_Hips', spine_01: 'J_Bip_C_Spine', spine_02: 'J_Bip_C_Chest', spine_03: 'J_Bip_C_UpperChest',
+  neck_01: 'J_Bip_C_Neck', Head: 'J_Bip_C_Head',
+  upperarm_l: 'J_Bip_L_UpperArm', lowerarm_l: 'J_Bip_L_LowerArm', hand_l: 'J_Bip_L_Hand',
+  upperarm_r: 'J_Bip_R_UpperArm', lowerarm_r: 'J_Bip_R_LowerArm', hand_r: 'J_Bip_R_Hand',
+  thigh_l: 'J_Bip_L_UpperLeg', calf_l: 'J_Bip_L_LowerLeg', foot_l: 'J_Bip_L_Foot',
+  thigh_r: 'J_Bip_R_UpperLeg', calf_r: 'J_Bip_R_LowerLeg', foot_r: 'J_Bip_R_Foot',
+};
 
 var MODELS = { rig: null, ready: false, icons: {} };
 
@@ -33,81 +45,21 @@ function loadImage3(src) {
 
 function color3(hex) { return new THREE.Color(hex); }
 
-/** 옷을 뼈대 기준 위치로 칠하는 재질 */
-function paintedMaterial(base, uniforms) {
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.62, metalness: 0 });
-  mat.onBeforeCompile = (s) => {
-    Object.assign(s.uniforms, uniforms);
-    s.vertexShader = 'varying vec3 vBindP;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vBindP = position;');
-    s.fragmentShader = 'varying vec3 vBindP;\nuniform vec3 uSkin,uShirt,uPants,uShoes;uniform vec2 uH;\n' + s.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-      float yy = vBindP.y / uH.x;
-      float xx = abs(vBindP.x) / uH.x;
-      vec3 c = uSkin;
-      if (yy < 0.075) c = uShoes;
-      else if (yy < 0.53) c = uPants;
-      else if (yy < 0.555) c = uPants * 0.45;
-      else if (yy < 0.835 && xx < 0.235) c = uShirt;
-      diffuseColor.rgb = c;`);
-  };
-  return mat;
+function toonGradient() {
+  const t = new THREE.DataTexture(new Uint8Array([TOON.shade, TOON.shade, TOON.shade, 255, TOON.lit, TOON.lit, TOON.lit, 255]), 2, 1);
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.needsUpdate = true;
+  return t;
 }
 
-function hairMesh(look, mat) {
-  const g = new THREE.Group();
-  const cap = (sx, sy, sz, y, z) => {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mat);
-    m.scale.set(sx, sy, sz);
-    m.position.set(0, y, z);
-    m.castShadow = true;
-    g.add(m);
-    return m;
-  };
-  // 옆·뒷머리
-  if (look.hair) cap(0.108, 0.125, 0.112, 0.012, -0.018);
-  if (look.style === 'swept') {
-    cap(0.1, 0.075, 0.108, 0.05, -0.012);
-    cap(0.075, 0.04, 0.07, 0.115, 0.03).rotation.x = -0.4;
-  } else if (look.style === 'pony') {
-    cap(0.103, 0.082, 0.11, 0.045, -0.015);
-    cap(0.042, 0.095, 0.042, -0.015, -0.125);
-  } else if (look.style === 'flat') {
-    cap(0.099, 0.06, 0.104, 0.075, -0.008);
-  } else if (look.style === 'bun') {
-    cap(0.102, 0.078, 0.108, 0.048, -0.014);
-    cap(0.05, 0.05, 0.05, 0.135, -0.04);
-  } else if (look.style === 'spike') {
-    cap(0.098, 0.06, 0.103, 0.06, -0.01);
-    for (let i = 0; i < 6; i++) {
-      const c = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 6), mat);
-      const a = (i / 6) * 6.28;
-      c.position.set(Math.cos(a) * 0.06, 0.13, Math.sin(a) * 0.06);
-      c.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4);
-      g.add(c);
-    }
-  }
-  return g;
-}
-
-function faceGroup(look) {
-  const g = new THREE.Group();
-  const eyeMat = new THREE.MeshBasicMaterial({ color: look.style === 'bot' ? 0xffe25a : 0x1a1512 });
-  [-1, 1].forEach((s) => {
-    const e = new THREE.Mesh(new THREE.SphereGeometry(look.style === 'bot' ? 0.024 : 0.017, 10, 8), eyeMat);
-    e.position.set(s * 0.04, 0.012, 0.098);
-    g.add(e);
-    if (look.style !== 'bot') {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.009, 0.01), new THREE.MeshBasicMaterial({ color: look.hair || 0x222222 }));
-      b.position.set(s * 0.04, 0.045, 0.096);
-      g.add(b);
-    }
-  });
-  if (look.style !== 'bot') {
-    const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.0045, 6, 12, Math.PI), new THREE.MeshBasicMaterial({ color: 0x8a3f33 }));
-    mouth.rotation.z = Math.PI;
-    mouth.position.set(0, -0.035, 0.1);
-    g.add(mouth);
-  }
-  return g;
+/** 재질 이름으로 색을 입힐 부위를 정한다 */
+function partOf(name) {
+  if (/_SKIN/.test(name)) return 'skin';
+  if (/_HAIR/.test(name)) return 'hair';
+  if (/Tops|Accessory/.test(name)) return 'shirt';
+  if (/Bottoms/.test(name)) return 'pants';
+  if (/Shoes/.test(name)) return 'shoes';
+  return null;
 }
 
 function hatMesh(id) {
@@ -195,64 +147,97 @@ function clubMesh(type, color) {
   return g;
 }
 
-/** 내장 GLB → 포즈를 줄 수 있는 캐릭터 */
-async function loadModels() {
-  _q1 = new THREE.Quaternion(); _q2 = new THREE.Quaternion();
-  _v1 = new THREE.Vector3(); _v2 = new THREE.Vector3(); _v3 = new THREE.Vector3(); _v4 = new THREE.Vector3();
-  const gltf = await new Promise((ok, no) => new THREE.GLTFLoader().parse(base64ToBuffer(ASSETS.golfer), '', ok, no));
+/** 내장 GLB 하나 → 몸 하나(뼈대·재질·머리 위치) */
+async function loadBody(key, group, gradient) {
+  const gltf = await new Promise((ok, no) => new THREE.GLTFLoader().parse(base64ToBuffer(CHAR_GLB[key]), '', ok, no));
   const root = gltf.scene;
-  const group = new THREE.Group();
+  root.rotation.y = Math.PI; // VRoid는 -Z를 본다. 게임은 앞이 +Z, 왼쪽이 +X
   group.add(root);
-  const bones = {};
-  let height = 0;
-  const uniforms = { uSkin: { value: color3('#ffffff') }, uShirt: { value: color3('#ffffff') }, uPants: { value: color3('#ffffff') }, uShoes: { value: color3('#ffffff') }, uH: { value: new THREE.Vector2(1, 0) } };
-  const mat = paintedMaterial(null, uniforms);
+  const nodes = {};
+  const tints = { skin: [], hair: [], shirt: [], pants: [], shoes: [] };
+  const meshes = [];
   root.traverse((o) => {
-    if (o.isBone) bones[o.name] = o;
-    if (o.isSkinnedMesh) {
-      o.material = mat;
-      o.castShadow = true;
-      o.frustumCulled = false;
-      o.geometry.computeBoundingBox();
-      height = Math.max(height, o.geometry.boundingBox.max.y);
-    }
+    if (o.isBone || o.type === 'Object3D') nodes[o.name] = o;
+    if (!o.isMesh) return;
+    const m = o.material;
+    const mat = new THREE.MeshToonMaterial({ map: m.map, color: 0xffffff, gradientMap: gradient, side: m.side, transparent: m.transparent, alphaTest: m.alphaTest, depthWrite: m.depthWrite });
+    mat.name = m.name;
+    o.material = mat;
+    o.renderOrder = m.transparent ? 2 : 0;
+    o.castShadow = !m.transparent;
+    o.frustumCulled = false;
+    const part = partOf(m.name);
+    if (part) tints[part].push(mat);
+    meshes.push(o);
   });
-  uniforms.uH.value.x = height;
+  const bones = {};
+  for (const k in BONE_ALIAS) bones[k] = nodes[BONE_ALIAS[k]];
   group.updateMatrixWorld(true);
   const bind = new Map();
-  for (const name in bones) {
-    const b = bones[name];
+  root.traverse((b) => {
+    if (!b.isBone) return;
     bind.set(b, { q: b.quaternion.clone(), p: b.position.clone(), world: b.getWorldQuaternion(new THREE.Quaternion()), wp: b.getWorldPosition(new THREE.Vector3()) });
-  }
-  const headRig = new THREE.Group();
-  bones.Head.add(headRig);
-  // 머리 뼈대의 축과 무관하게 모델 축 기준으로 장식을 붙인다
-  headRig.quaternion.copy(bind.get(bones.Head).world).invert();
-  const scaleWorld = bones.Head.getWorldScale(new THREE.Vector3());
-  headRig.scale.setScalar(1 / scaleWorld.x);
-  headRig.position.set(0, 0.0, 0);
-  // 머리 메시의 실제 중심과 크기를 재서 머리카락·얼굴·모자를 맞춘다
+  });
+  // 머리(얼굴 피부)와 머리카락 꼭대기를 재서 모자를 맞춘다
+  const headP = bind.get(bones.Head).wp;
   const lo = new THREE.Vector3(1e9, 1e9, 1e9), hi = new THREE.Vector3(-1e9, -1e9, -1e9);
-  root.traverse((o) => {
-    if (!o.isSkinnedMesh) return;
+  let hairTop = -1e9;
+  meshes.forEach((o) => {
+    const face = /Face_00_SKIN/.test(o.material.name), hair = /_HAIR/.test(o.material.name);
+    if (!face && !hair) return;
     const p = o.geometry.attributes.position;
     for (let i = 0; i < p.count; i++) {
-      if (p.getY(i) < height * 0.875 || Math.abs(p.getX(i)) > height * 0.1) continue;
-      lo.min(_v1.set(p.getX(i), p.getY(i), p.getZ(i)));
-      hi.max(_v1);
+      _v1.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+      if (face && _v1.y > headP.y - 0.02) { lo.min(_v1); hi.max(_v1); }
+      if (hair && Math.abs(_v1.x - headP.x) < 0.05 && Math.abs(_v1.z - headP.z) < 0.08) hairTop = Math.max(hairTop, _v1.y);
     }
   });
-  const headP = bind.get(bones.Head).wp;
-  const headFit = {
+  const fit = {
     x: (lo.x + hi.x) / 2 - headP.x, y: (lo.y + hi.y) / 2 - headP.y, z: (lo.z + hi.z) / 2 - headP.z,
     sx: (hi.x - lo.x) / 0.2, sy: (hi.y - lo.y) / 0.24, sz: (hi.z - lo.z) / 0.21,
   };
-  const rig = { group, root, bones, bind, uniforms, headRig, headFit, height, mixer: new THREE.AnimationMixer(root), clips: {}, club: null, clubKey: '', appearKey: '', dancing: false, grip0: null };
-  gltf.animations.forEach((a) => { rig.clips[a.name] = rig.mixer.clipAction(a); });
+  // 얼굴 메시는 뒤통수가 없어 앞으로 치우친다: 둥근 머리로 보고 뒤로 민다. 머리카락 두께만큼 띄운다(삐침 머리는 무시)
+  fit.sz = fit.sx;
+  fit.z -= 0.035;
+  fit.lift = Math.min(Math.max(0, hairTop - hi.y), TOON.hairLift) / fit.sy;
+  const headRig = new THREE.Group();
+  bones.Head.add(headRig);
+  // 머리 뼈대의 축과 무관하게 캐릭터 축 기준으로 장식을 붙인다
+  headRig.quaternion.copy(bind.get(bones.Head).world).invert();
+  headRig.scale.setScalar(1 / bones.Head.getWorldScale(new THREE.Vector3()).x);
+  return { key, root, bones, bind, tints, headRig, headFit: fit, height: hi.y, grip0: null };
+}
+
+/** 내장 캐릭터 두 몸을 읽어 포즈를 줄 수 있는 리그를 만든다 */
+async function loadModels() {
+  _q1 = new THREE.Quaternion(); _q2 = new THREE.Quaternion();
+  _v1 = new THREE.Vector3(); _v2 = new THREE.Vector3(); _v3 = new THREE.Vector3(); _v4 = new THREE.Vector3();
+  const group = new THREE.Group();
+  const gradient = toonGradient();
+  const bodies = { boy: await loadBody('boy', group, gradient), girl: await loadBody('girl', group, gradient) };
+  const rig = { group, bodies, body: null, club: null, clubKey: '', appearKey: '', dancing: false };
+  useBody(rig, 'boy');
   MODELS.rig = rig;
   poseGolfer(rig, 0, null);
+  useBody(rig, 'girl');
+  poseGolfer(rig, 0, null);
+  useBody(rig, 'boy');
   MODELS.ready = true;
   return rig;
+}
+
+/** 보이는 몸을 바꾸고 자세 코드가 쓰는 값을 그 몸으로 맞춘다 */
+function useBody(rig, key) {
+  if (rig.body === rig.bodies[key]) return;
+  const b = rig.bodies[key];
+  for (const k in rig.bodies) rig.bodies[k].root.visible = k === key;
+  rig.body = b;
+  rig.root = b.root;
+  rig.bones = b.bones;
+  rig.bind = b.bind;
+  rig.headRig = b.headRig;
+  rig.headFit = b.headFit;
+  rig.height = b.height;
 }
 
 function resetBones(rig) {
@@ -302,7 +287,7 @@ function twoBoneIK(upper, lower, end, target, poleW) {
 function clubReach(type) {
   const rig = MODELS.rig;
   const len = CLUB_TYPES[type].len;
-  const g = rig && rig.grip0 ? rig.grip0 : { y: 0.76, z: 0.4 };
+  const g = rig && rig.body && rig.body.grip0 ? rig.body.grip0 : { y: 0.72, z: 0.38 };
   return g.z + Math.sqrt(Math.max(0.04, len * len - g.y * g.y));
 }
 
@@ -352,7 +337,7 @@ function poseGolfer(rig, theta, clubType) {
   const axis = new THREE.Vector3().crossVectors(D, XL).normalize();
   const hub = new THREE.Vector3(0, chest.y - 0.02, chest.z + 0.04);
   const grip = hub.clone().add(D.clone().multiplyScalar(RIG_CFG.armR).applyAxisAngle(axis, th * RIG_CFG.armRatio));
-  if (theta === 0) rig.grip0 = { y: grip.y, z: grip.z };
+  if (theta === 0) rig.body.grip0 = { y: grip.y, z: grip.z };
   const reach = clubType ? clubReach(clubType) : 1;
   const addr = hub.clone().add(D.clone().multiplyScalar(RIG_CFG.armR));
   const dir0 = new THREE.Vector3(0, 0, reach).sub(addr).normalize();
@@ -370,32 +355,55 @@ function poseGolfer(rig, theta, clubType) {
   }
 }
 
+/** 홀인 뒤 기뻐하는 자세(동작 데이터 없이 코드로): 두 팔을 번갈아 흔들며 통통 뛴다 */
+function poseCheer(rig, t) {
+  const B = rig.bones;
+  const g = rig.group;
+  resetBones(rig);
+  g.updateMatrixWorld(true);
+  const dirW = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(g.quaternion).normalize();
+  const hop = Math.abs(Math.sin(t * 5.2)) * 0.06;
+  const pb = rig.bind.get(B.pelvis);
+  B.pelvis.parent.updateMatrixWorld(true);
+  B.pelvis.position.copy(B.pelvis.parent.worldToLocal(new THREE.Vector3(pb.wp.x, pb.wp.y + hop, pb.wp.z).applyMatrix4(g.matrixWorld)));
+  B.pelvis.updateMatrixWorld(true);
+  rotateWorld(B.spine_02, dirW(0, 0, 1), Math.sin(t * 2.6) * 0.08);
+  [['l', 1], ['r', -1]].forEach(([s, side], i) => {
+    const wave = Math.sin(t * 7 + i * Math.PI) * 0.25;
+    const up = B['upperarm_' + s], low = B['lowerarm_' + s], hand = B['hand_' + s];
+    aimBone(up, low.getWorldPosition(new THREE.Vector3()), up.getWorldPosition(new THREE.Vector3()).add(dirW(side * (0.45 + wave * 0.4), 1, 0.1)));
+    aimBone(low, hand.getWorldPosition(new THREE.Vector3()), low.getWorldPosition(new THREE.Vector3()).add(dirW(side * (0.15 + wave), 1, 0.15)));
+  });
+  rotateWorld(B.Head, dirW(0, 0, 1), Math.sin(t * 5.2) * 0.12);
+}
+
 /** 캐릭터 외형을 장비에 맞춘다 */
 function applyAppearance(rig, equip, clubType) {
   const key = equip.char + equip.hat + equip.top + equip.shoes;
   if (key !== rig.appearKey) {
     rig.appearKey = key;
     const look = CHAR_LOOK[equip.char];
+    useBody(rig, look.body);
     const top = ITEMS.top.find((t) => t.id === equip.top);
     const shoes = ITEMS.shoes.find((t) => t.id === equip.shoes);
-    const u = rig.uniforms;
-    u.uSkin.value.set(look.skin);
-    u.uShirt.value.set(top && top.color ? top.color : look.shirt);
-    u.uPants.value.set(look.pants);
-    u.uShoes.value.set(shoes && shoes.color ? shoes.color : look.shoes);
-    let mat;
-    rig.root.traverse((o) => { if (o.isSkinnedMesh) mat = o.material; });
-    mat.metalness = look.metal ? 0.65 : 0;
-    mat.roughness = look.metal ? 0.34 : 0.62;
+    const ref = color3(TOON.skinRef);
+    const skin = color3(look.skin);
+    skin.setRGB(Math.min(1, skin.r / ref.r), Math.min(1, skin.g / ref.g), Math.min(1, skin.b / ref.b));
+    const set = (part, c) => rig.body.tints[part].forEach((m) => m.color.copy(c));
+    set('skin', skin);
+    set('hair', color3(look.hair));
+    set('shirt', color3(top && top.color ? top.color : look.shirt));
+    set('pants', color3(look.pants));
+    set('shoes', color3(shoes && shoes.color ? shoes.color : look.shoes));
     while (rig.headRig.children.length) rig.headRig.remove(rig.headRig.children[0]);
     const holder = new THREE.Group();
     const fit = rig.headFit;
     holder.position.set(fit.x, fit.y, fit.z);
     holder.scale.set(fit.sx, fit.sy, fit.sz);
-    if (look.hair) holder.add(hairMesh(look, new THREE.MeshStandardMaterial({ color: look.hair, roughness: 0.72 })));
-    holder.add(faceGroup(look));
     const hat = hatMesh(equip.hat);
-    hat.position.y = 0.03;
+    // 모자는 머리카락 위에 얹는다
+    hat.position.y = 0.03 + fit.lift;
+    hat.scale.setScalar(TOON.hatScale);
     holder.add(hat);
     rig.headRig.add(holder);
   }
@@ -469,8 +477,9 @@ function renderIcons(renderer) {
   };
   const base = Object.assign({}, DEFAULT_EQUIP);
   if (rig.club) rig.club.visible = false;
-  cam.position.set(0, rig.height * 0.56, 4.3);
-  cam.lookAt(0, rig.height * 0.5, 0);
+  // 무릎 위로 크게 담는다
+  cam.position.set(0, rig.height * 0.7, 3.1);
+  cam.lookAt(0, rig.height * 0.64, 0);
   ITEMS.char.forEach((c) => {
     applyAppearance(rig, Object.assign({}, base, { char: c.id }), '5I');
     if (rig.club) rig.club.visible = false;

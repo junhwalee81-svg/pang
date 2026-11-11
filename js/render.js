@@ -707,21 +707,9 @@ function updateGolfer(G) {
   rig.group.position.set(gf.x, heightAt(G.hole, gf.x, gf.z), gf.z);
   rig.group.rotation.y = -gf.yaw;
   rig.group.updateMatrixWorld(true);
-  if (gf.pose === 'dance') {
-    if (!rig.dancing) {
-      rig.dancing = true;
-      resetBones(rig);
-      rig.clips.Dance_Loop.reset().play();
-      if (rig.club) rig.club.visible = false;
-    }
-    rig.mixer.setTime(G.time);
-    return;
-  }
-  if (rig.dancing) {
-    rig.dancing = false;
-    rig.clips.Dance_Loop.stop();
-    if (rig.club) rig.club.visible = true;
-  }
+  const dance = gf.pose === 'dance';
+  if (rig.club) rig.club.visible = !dance;
+  if (dance) { poseCheer(rig, G.time); return; }
   poseGolfer(rig, gf.phi, club);
 }
 

@@ -1,7 +1,7 @@
 """CC0 원본을 줄여 js/assets.js(data URI)로 굽는다.
 
-사용법: py -I tools/bake_assets.py <particle-pack 폴더> <공용에셋 폴더> <golfer.glb>
-golfer.glb 는 공용에셋 tools/gltf-pack 으로 UAL1_Standard.glb 에서 Idle_Loop, Dance_Loop 만 남긴 것.
+사용법: py -I tools/bake_assets.py <particle-pack 폴더> <공용에셋 폴더>
+캐릭터는 tools/bake_characters.js 가 js/characters.js 로 따로 만든다.
 """
 import base64
 import io
@@ -13,7 +13,7 @@ from PIL import Image, ImageEnhance, ImageStat
 
 Image.MAX_IMAGE_PIXELS = None
 
-PARTICLE, SHARED, GLB = sys.argv[1], sys.argv[2], sys.argv[3]
+PARTICLE, SHARED = sys.argv[1], sys.argv[2]
 OUT = os.path.join(os.path.dirname(__file__), '..', 'js', 'assets.js')
 SAMJOKO = os.path.join(SHARED, '받은에셋', 'samjoko')
 
@@ -64,14 +64,12 @@ def main():
         out['tex'][key] = uri(ImageEnhance.Contrast(im).enhance(1.1), 66)
     water = Image.open(os.path.join(SAMJOKO, 'three_water', 'waternormals.jpg')).convert('RGB').resize((256, 256), Image.LANCZOS)
     out['tex']['water'] = uri(water, 70)
-    with open(GLB, 'rb') as fh:
-        out['golfer'] = base64.b64encode(fh.read()).decode()
     text = '/* tools/bake_assets.py 로 생성 — 직접 고치지 말 것. 출처는 CREDITS.md */\n'
     text += 'var ASSETS = ' + json.dumps(out, separators=(',', ':')) + ';\n'
     with open(OUT, 'w', encoding='utf-8') as fh:
         fh.write(text)
     print('assets.js', round(len(text) / 1024), 'KB')
-    for group in ('sky', 'tree', 'fx', 'tex', 'golfer'):
+    for group in ('sky', 'tree', 'fx', 'tex'):
         print(group, round(len(json.dumps(out[group])) / 1024), 'KB')
 
 

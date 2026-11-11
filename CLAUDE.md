@@ -16,16 +16,18 @@
 |---|---|
 | `index.html`, `css/style.css` | DOM 뼈대(HUD, 조작판, 타이틀, 창)와 스타일 |
 | `js/assets.js` | 내장 그림(자동 생성, `tools/bake_assets.py`) |
+| `js/characters.js` | 내장 캐릭터 GLB 두 개(남·여, 자동 생성, `tools/bake_characters.js`) |
 | `js/data.js` | `CLUB_TYPES`, `SPECIAL_SHOTS`, `ITEMS`(장비 5슬롯, 캐릭터 `passive`), `THEMES`, `HOLES` |
 | `js/lib/` | three.js r147, GLTFLoader, 라이선스 |
 | `js/physics.js` | 3D 물리(x 앞, y 위, z 오른쪽). `PHYS`, `HAZARD`, `TERRAIN`, `COURSE`, 높이·지형 표, `rollHoleLayout`, `launchFrom`, `stepBall`, `simulateShot`(Node에서도 실행) |
 | `js/audio.js` | `SFX`: WebAudio 합성음. `compose`는 오프라인 렌더로도 검사 가능 |
-| `js/models.js` | 3D 캐릭터: 뼈대 IK 스윙 `poseGolfer`, 옷 색 칠하기, 머리·모자·클럽 메시, 상점 아이콘 촬영 `renderIcons` |
+| `js/models.js` | 3D 캐릭터: VRoid 애니 모델 두 몸(`useBody`), 툰 음영(`TOON`), 재질 이름으로 부위별 색 입히기(`CHAR_LOOK`), 뼈대 IK 스윙 `poseGolfer`, 홀인 기쁨 `poseCheer`, 모자·클럽 메시, 상점 아이콘 촬영 `renderIcons` |
 | `js/render.js` | three.js 장면: 코스 그림 `paintCourse`, 지형·물·나무·돌, 공·궤적·입자, 미니맵 |
 | `js/game.js` | `GAME` 상수, 상태 `G`, 샷 진행, 입자, 카메라. 공개 함수 `pressShot`, `placeBall(x, z)`, `readyNextShot`, `setYaw` |
 | `js/ui.js` | 입력, HUD 동기화, 상점·결과 창, 게임 루프, `?test` 음소거, `?test&manual`은 `__step(초)`로 직접 진행 |
 | `tests/` | `distance.js`(비거리), `hazards.js`(코스 변수), `playthrough.js`(전 기능), `tour.js`(6홀 완주·380px 넘침) |
-| `tools/bake_assets.py` | CC0 원본(하늘·나무·질감·입자·캐릭터 GLB) → `assets.js` |
+| `tools/bake_assets.py` | CC0 원본(하늘·나무·질감·입자) → `assets.js` |
+| `tools/bake_characters.js` | VRoid CC0 VRM → `characters.js` (`vrm_slim.js`로 모프·확장 제거, `vrm_tex.py`로 그림 축소·회색화, 공용에셋 gltf-pack + icarus glbslim) |
 
 샷 단계: `aim → power → impact → swing → ball → stopped/holed → score`. 파워 게이지가 0으로 내려오거나 임팩트를 놓치면 `cancelShot`으로 타수 없이 `aim`에 돌아간다.
 
@@ -86,4 +88,5 @@ NODE_PATH=<playwright-core의 node_modules> node tests/tour.js <스크린샷 폴
 - 코스 확장(9·18홀), 비·저녁 같은 날씨, 비행 중 돌풍
 - 온라인 점수판과 일일 도전(공용에셋의 Supabase 점수판 재사용)
 - 스윙 중 팔·몸 회전 다듬기, 캐릭터별 승리 포즈
-- 나무를 3D 모델로 교체, 공이 멈춘 곳까지 걸어가는 연출, 캐릭터별 얼굴 다듬기
+- 나무를 3D 모델로 교체, 공이 멈춘 곳까지 걸어가는 연출
+- 캐릭터: 표정(모프를 하나만 남겨 웃는 얼굴), 머리카락 흔들림, characters.js(약 4MB) 더 줄이기(면 수 축소)

@@ -4,7 +4,7 @@
 
 | 에셋 | 제작 | 라이선스 | 출처 | 쓴 곳 |
 |---|---|---|---|---|
-| Universal Animation Library (뼈대가 있는 3D 인체) | Quaternius | CC0 1.0 | https://quaternius.com/packs/universalanimationlibrary.html | 3D 캐릭터 |
+| VRoid Studio 샘플 모델 HairSample_Female, HairSample_Male (애니풍 3D 캐릭터) | VRoid 프로젝트(pixiv) | CC0 1.0 | https://vroid.pixiv.help/hc/en-us/articles/4402614652569 (내려받기: https://opengameart.org/content/vroid-studio-cc0-models) | 3D 캐릭터. 모프·노멀맵을 빼고 그림을 줄였으며 머리·바지·신발 그림은 회색으로 바꿔 색을 입힌다 |
 | 하늘 HDRI 4종(kloofendal_48d_partly_cloudy, autumn_field, citrus_orchard, qwantani_sunset) | Poly Haven | CC0 1.0 | https://polyhaven.com | 하늘 |
 | 나무 모델을 구운 그림(island_tree_02, jacaranda_tree, fir_tree_01) | Poly Haven | CC0 1.0 | https://polyhaven.com | 코스 나무 |
 | Particle Pack (연기·별·빛·고리) | Kenney | CC0 1.0 | https://kenney.nl/assets/particle-pack | 효과 입자 |
